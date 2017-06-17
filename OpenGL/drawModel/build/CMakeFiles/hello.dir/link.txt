@@ -1,0 +1,1 @@
+/usr/bin/c++      CMakeFiles/hello.dir/helloTriangle.cpp.o  -o ../bin/hello -rdynamic 

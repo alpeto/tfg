@@ -1,0 +1,3 @@
+/home/albert/Universidad/TFG/OpenGL/helloTriangle/build/CMakeFiles/rebuild_cache.dir
+/home/albert/Universidad/TFG/OpenGL/helloTriangle/build/CMakeFiles/edit_cache.dir
+/home/albert/Universidad/TFG/OpenGL/helloTriangle/build/CMakeFiles/hello.dir

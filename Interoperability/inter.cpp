@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <vector>
 #include "shader.h"
+#include "errors.h"
 
 cl_context context;
 cl_command_queue queue;
@@ -22,6 +23,7 @@ cl_uint num_of_platforms=0;
 cl_platform_id platform_id;
 cl_device_id device_id;
 cl_uint num_of_devices=0;
+//File * kernel_code;
 cl_kernel kernel_image;
 cl_program program;
 cl_mem mem;	
@@ -31,19 +33,17 @@ GLuint texture;
 
 
 const char *ProgramSource = 
-"__kernel void copy(__global float *mem)\n"\
+"__kernel void red(__write_only image2d_t output)\n"\
 "{\n"\
-"  size_t id = get_global_id(0);\n"\
-"  mem[id] = mem[id];\n"\
+"	int2 currentPosition = (get_global_id(0), get_global_id(1));\n"\
+"	float4 red = (float4)(1,0,0,0);\n"\
+"	write_imagef(output, currentPosition, red);\n"	
 "}\n";
 
 
-int tex_height=2, tex_width=2;  //Now it is 0, but this variable will be determined by openCL size data.
+int tex_height=1, tex_width=1;  //Now it is 0, but this variable will be determined by openCL size data.
 
-
-#define DATA_SIZE 4
-float inputData[DATA_SIZE]={65535.0f, 65535.0f, 65535.0f, 65535.0f}; //simulation of the data
-float results[DATA_SIZE]={0};
+#define DATA_SIZE 1
 
 // settings
 const unsigned int SCR_WIDTH = 800;
@@ -114,72 +114,55 @@ int main(){
 	};  
 
 	// try to get a supported GPU device
-	if (clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_CPU, 1, &device_id, &num_of_devices) != CL_SUCCESS)
-	{
-		printf("Unable to get device_id\n");
-		return 1;
-	}
-
+	err = clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_CPU, 1, &device_id, &num_of_devices);
+	std::cout<<"GETTING DEVICES: "<<  getErrorString(err)<< std::endl;
 	//Creating the context and the queue
 	context = clCreateContext(props,1,&device_id,0,0,NULL);
 	queue = clCreateCommandQueue(context,device_id,CL_QUEUE_PROFILING_ENABLE,NULL);
+	
+	//kernel_code = fopen("kernel_inter.ocl", "r");
+	program = clCreateProgramWithSource(context,1,(const char **) &ProgramSource, NULL, &err);
+	std::cout<<"GETTING PROGRAM: "<<  getErrorString(err)<< std::endl;
+	// compile the program
+	err = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
+	std::cout<<"BUILDING PROGRAM: "<<  getErrorString(err)<< std::endl;
 
 // 1.Create 2D texture (OpenGL) 
 	//generate the texture ID 
 	glGenTextures(1, &texture); 
-	//binding the texture and setting the
+	//bdinding the texture and setting the
 	glBindTexture(GL_TEXTURE_2D, texture);
-
 	//regular sampler params
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
 	//need to set GL_NEAREST  
 	//(and not GL_NEAREST_MIPMAP_* which results in  CL_INVALID_GL_OBJECTlater)
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST); 
-
-	//specify texture dimensions, format etc  (tiene tex_width & tex_height, maybe they shouldnt)
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, tex_width, tex_height, 0, GL_RGB, GL_UNSIGNED_BYTE, 0);
+	//specify texture dimensions, format etc
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, tex_width, tex_height, 0, GL_RGBA, 
+	GL_UNSIGNED_BYTE, 0);
 
 //2.Create the OpenCL image corresponding to the texture
-	//mem = clCreateImage(context, CL_MEM_READ_WRITE, ,,CL_MEM_OBJECT_IMAGE2D,&	);
-	mem = clCreateFromGLTexture(context, CL_MEM_READ_WRITE, GL_TEXTURE_2D, 0,texture,&err);
+    mem = clCreateFromGLTexture(context, CL_MEM_READ_WRITE, GL_TEXTURE_2D, 0,texture,&err);
+    std::cout<<"TAKING FROM GL TEXTURE: "<<  getErrorString(err)<< std::endl;
 //3.Acquire  the ownership via clEnqueueAcquireGLObjects
 	glFinish();
 	clEnqueueAcquireGLObjects(queue, 1,  &mem, 0, 0, NULL); 
 //4 Execute the OpenCL kernel that alters the image
-	//load data into the input buffer
-	size_t size3DOrig[3] = {0, 0, 0};
-	size_t size3D[3] = {DATA_SIZE, DATA_SIZE, 1};
-	clEnqueueWriteImage(queue, mem, CL_TRUE, size3DOrig, size3D,0 , 0, inputData, 0, NULL, NULL);
-	
-	kernel_image = clCreateKernel(program, "copy", &err);
-	clSetKernelArg(kernel_image, 1, sizeof(cl_mem), &mem); 
-	global=DATA_SIZE; 
-	clEnqueueNDRangeKernel(queue, kernel_image, 1, NULL, &global, NULL, 0, NULL, NULL); 
+	kernel_image = clCreateKernel(program, "red", &err);
+	std::cout<<"CREATING KERNEL: "<<  getErrorString(err)<< std::endl;
+	err = clSetKernelArg(kernel_image, 0, sizeof(cl_mem), &mem); 
+	std::cout<<"Setting Kernel Argument: "<<  getErrorString(err)<< std::endl;
+	global = DATA_SIZE;
+	err = clEnqueueNDRangeKernel(queue, kernel_image, 2, NULL, &global, NULL, 0, NULL, NULL);  // ERROR
+	std::cout<<"Enqueuing Range Kernel: "<<  getErrorString(err)<< std::endl;
 
-	
 //5. Releasing the ownership via clEnqueueReleaseGLObjects
 	clFinish(queue);
-	clEnqueueReleaseGLObjects(queue, 1,  &mem, 0, 0, NULL); 
-	
-	clEnqueueReadImage(queue, mem, CL_TRUE, size3DOrig, size3D,0 , 0, results, 0, NULL, NULL);
-
-	// print the results
-	std::cout << "mem (values): ";
-	for(int i=0;i<DATA_SIZE; i++)
-	{
-		std::cout << results[i] << " ";
-	}	
-	std::cout << std::endl;
-	clReleaseMemObject(mem);
-	clReleaseProgram(program);
-	clReleaseKernel(kernel_image);
-	clReleaseCommandQueue(queue);
-	clReleaseContext(context);
-	
-	
+	err = clEnqueueReleaseGLObjects(queue, 1,  &mem, 0, 0, NULL); 
+	std::cout<<"RELEASING ENQUEUE OBJECTS: "<<  getErrorString(err)<< std::endl;	
+  
      // build and compile our shader zprogram
     // ------------------------------------
     Shader ourShader("inter.vs", "inter.fs");
@@ -188,10 +171,10 @@ int main(){
     // ------------------------------------------------------------------
     float vertices[] = {
         // positions          // colors           // texture coords
-         0.5f,  0.5f, 0.0f,   1.0f, 0.0f, 0.0f,   1.0f, 1.0f, // top right
-         0.5f, -0.5f, 0.0f,   0.0f, 1.0f, 0.0f,   1.0f, 0.0f, // bottom right
-        -0.5f, -0.5f, 0.0f,   0.0f, 0.0f, 1.0f,   0.0f, 0.0f, // bottom left
-        -0.5f,  0.5f, 0.0f,   1.0f, 1.0f, 0.0f,   0.0f, 1.0f  // top left 
+         0.5f,  0.5f, 0.0f,   0.0f, 0.0f, 0.0f,   1.0f, 1.0f, // top right
+         0.5f, -0.5f, 0.0f,   0.0f, 0.0f, 0.0f,   1.0f, 0.0f, // bottom right
+        -0.5f, -0.5f, 0.0f,   0.0f, 0.0f, 0.0f,   0.0f, 0.0f, // bottom left
+        -0.5f,  0.5f, 0.0f,   0.0f, 0.0f, 0.0f,   0.0f, 1.0f  // top left 
     };
     unsigned int indices[] = {
         0, 1, 3, // first triangle

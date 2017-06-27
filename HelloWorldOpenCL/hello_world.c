@@ -4,11 +4,6 @@
 #define DATA_SIZE 10
 
 
-/*
- * gcc -o hello_world -I$ATISTREAMSDKROOT/include -L$ATISTREAMSDKROOT/lib/x86 hello_world.c -lOpenCL
- * */
-
-
 const char *ProgramSource = 
 "__kernel void hello(__global float *input, __global float *output)\n"\
 "{\n"\
@@ -46,9 +41,7 @@ int main(void)
 		return 1;
 	}
 	
-	int a = num_of_platforms;
-	printf("SUCCESS: Number of platforms: %d\n",a);
-/*
+
 	// try to get a supported GPU device
 	if (clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_CPU, 1, &device_id, &num_of_devices) != CL_SUCCESS)
 	{
@@ -86,7 +79,7 @@ int main(void)
 	
 	// load data into the input buffer
 	clEnqueueWriteBuffer(command_queue, input, CL_TRUE, 0, sizeof(float) * DATA_SIZE, inputData, 0, NULL, NULL);
-	
+
 	// set the argument list for the kernel command
 	clSetKernelArg(kernel, 0, sizeof(cl_mem), &input);
 	clSetKernelArg(kernel, 1, sizeof(cl_mem), &output);
@@ -95,6 +88,7 @@ int main(void)
 	// enqueue the kernel command for execution
 	clEnqueueNDRangeKernel(command_queue, kernel, 1, NULL, &global, NULL, 0, NULL, NULL);
 	clFinish(command_queue);
+
 
 	// copy the results from out of the output buffer
 	clEnqueueReadBuffer(command_queue, output, CL_TRUE, 0, sizeof(float) *DATA_SIZE, results, 0, NULL, NULL);
@@ -113,7 +107,7 @@ int main(void)
 	clReleaseKernel(kernel);
 	clReleaseCommandQueue(command_queue);
 	clReleaseContext(context);
-*/
+
 	return 0;
 }
 

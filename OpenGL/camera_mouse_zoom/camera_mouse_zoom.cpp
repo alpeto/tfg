@@ -181,7 +181,6 @@ int main(int argc, char* argv[])
         // render boxes
         glBindVertexArray(VAO);
         
-        //DOUBT!!! SHOULD BE A LOOP FOR EACH VERTEX?
         
         for (unsigned int i = 0; i < vertexs.size(); i++)
         {

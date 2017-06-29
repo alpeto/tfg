@@ -1,6 +1,5 @@
 #define GLEW_STATIC
 #define CL_USE_DEPRECATED_OPENCL_1_2_APIS
-#include <stdio.h>
 #include "CL/cl.h"
 #include "CL/cl_gl.h"
 
@@ -23,23 +22,13 @@ cl_uint num_of_platforms=0;
 cl_platform_id platform_id;
 cl_device_id device_id;
 cl_uint num_of_devices=0;
-//File * kernel_code;
 cl_kernel kernel_image;
 cl_program program;
 cl_mem mem;	
 cl_int err;
 size_t global;
 GLuint texture;
-
-
-const char *ProgramSource = 
-"__kernel void red(__write_only image2d_t output)\n"\
-"{\n"\
-"	int2 currentPosition = (get_global_id(0), get_global_id(1));\n"\
-"	float4 red = (float4)(1,0,0,0);\n"\
-"	write_imagef(output, currentPosition, red);\n"	
-"}\n";
-
+std::string inputFileName = "kernel_inter.ocl";
 
 int tex_height=1, tex_width=1;  //Now it is 0, but this variable will be determined by openCL size data.
 
@@ -56,11 +45,10 @@ float texCoords[] = {
     1.1f, 1.1f   // tope-right corner
 };
 
-
-
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void processInput(GLFWwindow *window);
 //void mouse_callback(GLFWwindow* window, double xpos, double ypos);
+std::string getKernelCode(std::string);
 
 int main(){
     glfwInit();
@@ -116,6 +104,8 @@ int main(){
 	// try to get a supported GPU device
 	err = clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_CPU, 1, &device_id, &num_of_devices);
 	std::cout<<"GETTING DEVICES: "<<  getErrorString(err)<< std::endl;
+	std::string a = getKernelCode(inputFileName);
+	const char *ProgramSource = a.c_str();
 	//Creating the context and the queue
 	context = clCreateContext(props,1,&device_id,0,0,NULL);
 	queue = clCreateCommandQueue(context,device_id,CL_QUEUE_PROFILING_ENABLE,NULL);
@@ -171,10 +161,10 @@ int main(){
     // ------------------------------------------------------------------
     float vertices[] = {
         // positions          // colors           // texture coords
-         0.5f,  0.5f, 0.0f,   0.0f, 0.0f, 0.0f,   1.0f, 1.0f, // top right
-         0.5f, -0.5f, 0.0f,   0.0f, 0.0f, 0.0f,   1.0f, 0.0f, // bottom right
-        -0.5f, -0.5f, 0.0f,   0.0f, 0.0f, 0.0f,   0.0f, 0.0f, // bottom left
-        -0.5f,  0.5f, 0.0f,   0.0f, 0.0f, 0.0f,   0.0f, 1.0f  // top left 
+         0.97f,  0.97f, 0.0f,   0.0f, 0.0f, 0.0f,   1.0f, 1.0f, // top right
+         0.97f, -0.97f, 0.0f,   0.0f, 0.0f, 0.0f,   1.0f, 0.0f, // bottom right
+        -0.97f, -0.97f, 0.0f,   0.0f, 0.0f, 0.0f,   0.0f, 0.0f, // bottom left
+        -0.97f,  0.97f, 0.0f,   0.0f, 0.0f, 0.0f,   0.0f, 1.0f  // top left 
     };
     unsigned int indices[] = {
         0, 1, 3, // first triangle
@@ -262,4 +252,22 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height)
     glViewport(0, 0, width, height);
 }
 
+std::string getKernelCode(std::string inputFilename){
+	std::ifstream inputFile(inputFilename);
+	std::string result="";
+	if(inputFile)
+	{
+		std::string line;
+		while(std::getline(inputFile, line))
+		{          
+			result += line;
+		}
+	}
+	else
+	{
+		std::cout << "File '" << inputFilename << "' does not exist." <<  std::endl;
+	}
+	return result;
+
+}
  

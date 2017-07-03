@@ -1,5 +1,6 @@
 #define GLEW_STATIC
 #define CL_USE_DEPRECATED_OPENCL_1_2_APIS
+//#pragma OPENCL EXTENSION cl_khr_3d_image_writes : enable
 #include "CL/cl.h"
 #include "CL/cl_gl.h"
 
@@ -23,16 +24,18 @@ cl_platform_id platform_id;
 cl_device_id device_id;
 cl_uint num_of_devices=0;
 cl_kernel kernel_image;
-cl_program program;
+cl_program program, program2;
 cl_mem mem;	
 cl_int err;
 size_t global;
 GLuint texture;
-std::string inputFileName = "kernel_inter.ocl";
+std::string inputKernelFileName = "black_background.ocl";
+std::string inputKernelFileName2 = "red_points.ocl";
 
-int tex_height=1, tex_width=1;  //Now it is 0, but this variable will be determined by openCL size data.
+const char* inputDataFile = "kit.obj";
+int tex_height=4, tex_width=4, tex_depth=1;  //Now it is 0, but this variable will be determined by openCL size data.
 
-#define DATA_SIZE 1
+#define DATA_SIZE 16
 
 // settings
 const unsigned int SCR_WIDTH = 800;
@@ -47,10 +50,11 @@ float texCoords[] = {
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void processInput(GLFWwindow *window);
+bool obtainVertexs( const char * path, std::vector<float> &vertexs);
 //void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 std::string getKernelCode(std::string);
 
-int main(){
+int main(int argc, char* argv[]){
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -71,7 +75,7 @@ int main(){
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
    // glfwSetCursorPosCallback(window, mouse_callback);
    // glfwSetScrollCallback(window, scroll_callback);
-
+   
     // tell GLFW to capture our mouse
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
@@ -104,18 +108,45 @@ int main(){
 	// try to get a supported GPU device
 	err = clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_CPU, 1, &device_id, &num_of_devices);
 	std::cout<<"GETTING DEVICES: "<<  getErrorString(err)<< std::endl;
-	std::string a = getKernelCode(inputFileName);
-	const char *ProgramSource = a.c_str();
+	
 	//Creating the context and the queue
 	context = clCreateContext(props,1,&device_id,0,0,NULL);
 	queue = clCreateCommandQueue(context,device_id,CL_QUEUE_PROFILING_ENABLE,NULL);
 	
-	//kernel_code = fopen("kernel_inter.ocl", "r");
+	std::string a = getKernelCode(inputKernelFileName);
+	const char *ProgramSource = a.c_str();
+	
 	program = clCreateProgramWithSource(context,1,(const char **) &ProgramSource, NULL, &err);
-	std::cout<<"GETTING PROGRAM: "<<  getErrorString(err)<< std::endl;
+	std::cout<<"GETTING PROGRAM BLACK BACKGROUND: "<<  getErrorString(err)<< std::endl;
 	// compile the program
 	err = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
-	std::cout<<"BUILDING PROGRAM: "<<  getErrorString(err)<< std::endl;
+	std::cout<<"BUILDING PROGRAM BLACK BACKGROUND: "<<  getErrorString(err)<< std::endl;
+	
+	a = getKernelCode(inputKernelFileName2);
+	const char *ProgramSource2 = a.c_str();
+
+	program2 = clCreateProgramWithSource(context,1,(const char **) &ProgramSource2, NULL, &err);
+	std::cout<<"GETTING PROGRAM RED_POINTS: "<<  getErrorString(err)<< std::endl;
+	// compile the program
+	err = clBuildProgram(program2, 0, NULL, NULL, NULL, NULL);
+	std::cout<<"BUILDING PROGRAM RED_POINTS: "<<  getErrorString(err)<< std::endl;
+	
+
+//Create a Vertex Buffer & Reading inputData
+	std::vector<float> v_vertexs;
+	if(!obtainVertexs(inputDataFile,v_vertexs))
+	{ 
+		std::cout<<"Error reading the input data file"<<std::endl;
+		return 1;
+	}
+	int nvertexs = v_vertexs.size();
+	float* a_vertexs = &v_vertexs[0];
+
+	cl_mem vertexBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * nvertexs, NULL, &err);
+	std::cout<<"CREATING BUFFER: "<<  getErrorString(err)<< std::endl;
+	err = clEnqueueWriteBuffer(queue, vertexBuffer, CL_TRUE, 0, sizeof(float) * nvertexs, a_vertexs, 0, NULL, NULL);
+	std::cout<<"WRITING INPUT DATA TO BUFFER: "<<  getErrorString(err)<< std::endl;
+	clFinish(queue);
 
 // 1.Create 2D texture (OpenGL) 
 	//generate the texture ID 
@@ -130,8 +161,7 @@ int main(){
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST); 
 	//specify texture dimensions, format etc
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, tex_width, tex_height, 0, GL_RGBA, 
-	GL_UNSIGNED_BYTE, 0);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, tex_width, tex_height, 0, GL_RGBA, GL_FLOAT, 0);
 
 //2.Create the OpenCL image corresponding to the texture
     mem = clCreateFromGLTexture(context, CL_MEM_READ_WRITE, GL_TEXTURE_2D, 0,texture,&err);
@@ -139,15 +169,32 @@ int main(){
 //3.Acquire  the ownership via clEnqueueAcquireGLObjects
 	glFinish();
 	clEnqueueAcquireGLObjects(queue, 1,  &mem, 0, 0, NULL); 
+	clFinish(queue);
 //4 Execute the OpenCL kernel that alters the image
-	kernel_image = clCreateKernel(program, "red", &err);
-	std::cout<<"CREATING KERNEL: "<<  getErrorString(err)<< std::endl;
+	kernel_image = clCreateKernel(program, "black_background", &err);
+	std::cout<<"CREATING KERNEL BLACK_BACKGROUND: "<<  getErrorString(err)<< std::endl;
 	err = clSetKernelArg(kernel_image, 0, sizeof(cl_mem), &mem); 
 	std::cout<<"Setting Kernel Argument: "<<  getErrorString(err)<< std::endl;
-	global = DATA_SIZE;
-	err = clEnqueueNDRangeKernel(queue, kernel_image, 2, NULL, &global, NULL, 0, NULL, NULL);  // ERROR
+	//global = DATA_SIZE;
+	
+	size_t globalSizes[] = { tex_height,tex_width };
+	size_t globalSizesLocal[] = { 1, 1 };
+	
+	err = clEnqueueNDRangeKernel(queue, kernel_image, 2, NULL, globalSizes, globalSizesLocal, 0, NULL, NULL);  
 	std::cout<<"Enqueuing Range Kernel: "<<  getErrorString(err)<< std::endl;
+	clFinish(queue);
 
+	//PAINTING RED THE VERTEXS
+	kernel_image = clCreateKernel(program2, "red_points", &err);
+	std::cout<<"CREATING KERNEL RED_POINTS: "<<  getErrorString(err)<< std::endl;
+	err = clSetKernelArg(kernel_image, 0, sizeof(cl_mem), &mem); 
+	std::cout<<"Setting Kernel Argument(texture): "<<  getErrorString(err)<< std::endl;
+	err = clSetKernelArg(kernel_image, 1, sizeof(vertexBuffer), &vertexBuffer); 
+	std::cout<<"Setting Kernel Argument(vertexs): "<<  getErrorString(err)<< std::endl;
+	global = nvertexs;
+	err = clEnqueueNDRangeKernel(queue, kernel_image, 1, NULL, &global, NULL, 0, NULL, NULL);  
+	std::cout<<"Enqueuing Range Kernel: "<<  getErrorString(err)<< std::endl;
+	
 //5. Releasing the ownership via clEnqueueReleaseGLObjects
 	clFinish(queue);
 	err = clEnqueueReleaseGLObjects(queue, 1,  &mem, 0, 0, NULL); 
@@ -161,10 +208,10 @@ int main(){
     // ------------------------------------------------------------------
     float vertices[] = {
         // positions          // colors           // texture coords
-         0.97f,  0.97f, 0.0f,   0.0f, 0.0f, 0.0f,   1.0f, 1.0f, // top right
-         0.97f, -0.97f, 0.0f,   0.0f, 0.0f, 0.0f,   1.0f, 0.0f, // bottom right
-        -0.97f, -0.97f, 0.0f,   0.0f, 0.0f, 0.0f,   0.0f, 0.0f, // bottom left
-        -0.97f,  0.97f, 0.0f,   0.0f, 0.0f, 0.0f,   0.0f, 1.0f  // top left 
+         0.97f,  0.97f, 0.0f,   1.0f, 1.0f, 1.0f,   1.0f, 1.0f, // top right
+         0.97f, -0.97f, 0.0f,   1.0f, 1.0f, 1.0f,   1.0f, 0.0f, // bottom right
+        -0.97f, -0.97f, 0.0f,   1.0f, 1.0f, 1.0f,   0.0f, 0.0f, // bottom left
+        -0.97f,  0.97f, 0.0f,   1.0f, 1.0f, 1.0f,   0.0f, 1.0f  // top left 
     };
     unsigned int indices[] = {
         0, 1, 3, // first triangle
@@ -212,7 +259,7 @@ int main(){
         glClear(GL_COLOR_BUFFER_BIT);
 
         // bind textures on corresponding texture units
-        glActiveTexture(GL_TEXTURE0);
+        glActiveTexture(texture);
         glBindTexture(GL_TEXTURE_2D, texture);
 
         // render container
@@ -235,6 +282,13 @@ int main(){
     // glfw: terminate, clearing all previously allocated GLFW resources.
     // ------------------------------------------------------------------
     glfwTerminate();
+
+	clReleaseMemObject(mem);
+	clReleaseProgram(program);
+	clReleaseProgram(program2);
+	clReleaseKernel(kernel_image);
+	clReleaseCommandQueue(queue);
+	clReleaseContext(context);
 
 }
 
@@ -270,4 +324,22 @@ std::string getKernelCode(std::string inputFilename){
 	return result;
 
 }
- 
+bool obtainVertexs( const char * path, std::vector<float> &vertexs){
+	FILE * file = fopen(path, "r");
+	if(file == NULL) return false;
+	while(1){
+		char lineHeader[128];
+		int res = fscanf(file, "%s", lineHeader);
+		if (res == EOF) break;
+		else if ( strcmp( lineHeader, "v" ) == 0 ){
+			float x,y,z;
+			fscanf(file, "%f %f %f\n", &x, &y, &z); 
+			vertexs.push_back(x);
+			vertexs.push_back(y);
+			vertexs.push_back(z);
+
+		}
+		else return false;
+	}
+	return true;
+}

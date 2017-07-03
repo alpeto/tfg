@@ -1,0 +1,7 @@
+__kernel void black_background(__write_only image2d_t output)
+{
+	int2 currentPosition = (get_global_id(0),get_global_id(1));
+	float4 black = (float4)(1,1,1,1);
+	write_imagef(output, currentPosition, black);	
+	printf("%i %i \n", currentPosition.x, currentPosition.y);
+}

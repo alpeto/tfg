@@ -7,7 +7,7 @@
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
+//#include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <GL/glx.h>
 
@@ -33,9 +33,9 @@ std::string inputKernelFileName = "black_background.ocl";
 std::string inputKernelFileName2 = "red_points.ocl";
 
 const char* inputDataFile = "kit.obj";
-int tex_height=4, tex_width=4, tex_depth=1;  //Now it is 0, but this variable will be determined by openCL size data.
+int tex_height=200, tex_width=200, tex_depth=1;  //Now it is 0, but this variable will be determined by openCL size data.
 
-#define DATA_SIZE 16
+#define DATA_SIZE 4000
 
 // settings
 const unsigned int SCR_WIDTH = 800;
@@ -106,7 +106,7 @@ int main(int argc, char* argv[]){
 	};  
 
 	// try to get a supported GPU device
-	err = clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_CPU, 1, &device_id, &num_of_devices);
+	err = clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_ALL, 1, &device_id, &num_of_devices);
 	std::cout<<"GETTING DEVICES: "<<  getErrorString(err)<< std::endl;
 	
 	//Creating the context and the queue
@@ -164,12 +164,11 @@ int main(int argc, char* argv[]){
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, tex_width, tex_height, 0, GL_RGBA, GL_FLOAT, 0);
 
 //2.Create the OpenCL image corresponding to the texture
-    mem = clCreateFromGLTexture(context, CL_MEM_READ_WRITE, GL_TEXTURE_2D, 0,texture,&err);
+    mem = clCreateFromGLTexture(context, CL_MEM_WRITE_ONLY, GL_TEXTURE_2D, 0,texture,&err);
     std::cout<<"TAKING FROM GL TEXTURE: "<<  getErrorString(err)<< std::endl;
 //3.Acquire  the ownership via clEnqueueAcquireGLObjects
 	glFinish();
 	clEnqueueAcquireGLObjects(queue, 1,  &mem, 0, 0, NULL); 
-	clFinish(queue);
 //4 Execute the OpenCL kernel that alters the image
 	kernel_image = clCreateKernel(program, "black_background", &err);
 	std::cout<<"CREATING KERNEL BLACK_BACKGROUND: "<<  getErrorString(err)<< std::endl;
@@ -177,7 +176,7 @@ int main(int argc, char* argv[]){
 	std::cout<<"Setting Kernel Argument: "<<  getErrorString(err)<< std::endl;
 	//global = DATA_SIZE;
 	
-	size_t globalSizes[] = { tex_height,tex_width };
+	size_t globalSizes[] = { tex_width,tex_height };
 	size_t globalSizesLocal[] = { 1, 1 };
 	
 	err = clEnqueueNDRangeKernel(queue, kernel_image, 2, NULL, globalSizes, globalSizesLocal, 0, NULL, NULL);  

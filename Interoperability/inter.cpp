@@ -7,7 +7,7 @@
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
-//#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <GL/glx.h>
 
@@ -32,26 +32,37 @@ GLuint texture;
 std::string inputKernelFileName = "black_background.ocl";
 std::string inputKernelFileName2 = "red_points.ocl";
 
-const char* inputDataFile = "kit.obj";
-int tex_height=200, tex_width=200, tex_depth=1;  //Now it is 0, but this variable will be determined by openCL size data.
+const char* inputDataFile = "escala.obj";
+int tex_height=1000, tex_width=1000, tex_depth=1;  //Now it is 0, but this variable will be determined by openCL size data.
 
-#define DATA_SIZE 4000
+#define DATA_SIZE 1000000
 
 // settings
 const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
 
-float texCoords[] = {
-    0.0f, 0.0f,  // lower-left corner  
-    0.0f, 1.0f,  // top-left corner
-    1.0f, 0.0f,   // lower-right corner
-    1.1f, 1.1f   // tope-right corner
-};
+// camera
+glm::vec3 cameraPos   = glm::vec3(-0.5f, 3.0f, 0.5f);
+glm::vec3 cameraFront = glm::vec3(0.2f, -0.95f, -0.2f);
+glm::vec3 cameraUp    = glm::vec3(0.0f, 1.0f, 0.0f);
+
+bool firstMouse = true;
+float yaw   = -90.0f;	// yaw is initialized to -90.0 degrees since a yaw of 0.0 results in a direction vector pointing to the right so we initially rotate a bit to the left.
+float pitch =  0.0f;
+float lastX =  800.0f / 2.0;
+float lastY =  600.0 / 2.0;
+float fov   =  45.0f;
+
+// timing
+float deltaTime = 0.0f;	// time between current frame and last frame
+float lastFrame = 0.0f;
+
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void processInput(GLFWwindow *window);
 bool obtainVertexs( const char * path, std::vector<float> &vertexs);
-//void mouse_callback(GLFWwindow* window, double xpos, double ypos);
+void mouse_callback(GLFWwindow* window, double xpos, double ypos);
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
 std::string getKernelCode(std::string);
 
 int main(int argc, char* argv[]){
@@ -73,8 +84,8 @@ int main(int argc, char* argv[]){
     glfwMakeContextCurrent(window);
 
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
-   // glfwSetCursorPosCallback(window, mouse_callback);
-   // glfwSetScrollCallback(window, scroll_callback);
+    glfwSetCursorPosCallback(window, mouse_callback);
+    glfwSetScrollCallback(window, scroll_callback);
    
     // tell GLFW to capture our mouse
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
@@ -176,7 +187,7 @@ int main(int argc, char* argv[]){
 	std::cout<<"Setting Kernel Argument: "<<  getErrorString(err)<< std::endl;
 	//global = DATA_SIZE;
 	
-	size_t globalSizes[] = { tex_width,tex_height };
+	size_t globalSizes[] = { (size_t)tex_width,(size_t)tex_height };
 	size_t globalSizesLocal[] = { 1, 1 };
 	
 	err = clEnqueueNDRangeKernel(queue, kernel_image, 2, NULL, globalSizes, globalSizesLocal, 0, NULL, NULL);  
@@ -212,6 +223,8 @@ int main(int argc, char* argv[]){
         -0.97f, -0.97f, 0.0f,   1.0f, 1.0f, 1.0f,   0.0f, 0.0f, // bottom left
         -0.97f,  0.97f, 0.0f,   1.0f, 1.0f, 1.0f,   0.0f, 1.0f  // top left 
     };
+
+    
     unsigned int indices[] = {
         0, 1, 3, // first triangle
         1, 2, 3  // second triangle
@@ -248,39 +261,82 @@ int main(int argc, char* argv[]){
     // -----------
     while (!glfwWindowShouldClose(window))
     {
-        // input
-        // -----
-        processInput(window);
+	    
+		// per-frame time logic
+		// --------------------
+		float currentFrame = glfwGetTime();
+		deltaTime = currentFrame - lastFrame;
+		lastFrame = currentFrame;
 
-        // render
-        // ------
-        glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
+		// input
+		// -----
+		processInput(window);
 
-        // bind textures on corresponding texture units
-        glActiveTexture(texture);
-        glBindTexture(GL_TEXTURE_2D, texture);
+		// render
+		// ------
+		glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+		glClear(GL_COLOR_BUFFER_BIT);
 
-        // render container
-        ourShader.use();
-        glBindVertexArray(VAO);
-        glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+		// bind textures on corresponding texture units
+		glActiveTexture(texture);
+		glBindTexture(GL_TEXTURE_2D, texture);
 
-        // glfw: swap buffers and poll IO events (keys pressed/released, mouse moved etc.)
-        // -------------------------------------------------------------------------------
-        glfwSwapBuffers(window);
-        glfwPollEvents();
+		// render container
+//		ourShader.use();
+//		glBindVertexArray(VAO);
+//		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+
+		// pass projection matrix to shader (note that in this case it could change every frame)
+		glm::mat4 projection = glm::perspective(glm::radians(fov), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 100.0f);
+		ourShader.setMat4("projection", projection);
+
+		// camera/view transformation
+		glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+		ourShader.setMat4("view", view);
+
+		// render boxes
+		glBindVertexArray(VAO);
+		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+		std::vector< glm::vec3 > vertexs;
+		vertexs.push_back(glm::vec3(0.97f,  0.97f, 0.0f));
+		vertexs.push_back(glm::vec3(0.97f, -0.97f, 0.0f));
+		vertexs.push_back(glm::vec3(-0.97f, -0.97f, 0.0f));
+		vertexs.push_back(glm::vec3(-0.97f,  0.97f, 0.0f));
+
+		for (unsigned int i = 0; i < vertexs.size(); i++)
+		{
+			// calculate the model matrix for each object and pass it to shader before drawing
+			glm::mat4 model;
+			model = glm::translate(model, vertexs[i]);
+			float angle = 20.0f * i;
+			model = glm::rotate(model, glm::radians(angle), glm::vec3(1.0f, 0.3f, 0.5f));
+			ourShader.setMat4("model", model);
+		     glDrawArrays(GL_TRIANGLES, 0, 36);   
+		     
+		     std::vector<glm::vec4> temp;
+			temp.push_back(model * view * projection * glm::vec4(vertexs[1],1.0f)); 
+			std::cout<< temp[0].x<< std::endl;   
+		}
+
+		
+//       glDrawArrays(GL_POINTS, 0, sizeof(vertices) * sizeof(glm::vec3));*/
+		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+
+		// glfw: swap buffers and poll IO events (keys pressed/released, mouse moved etc.)
+		// -------------------------------------------------------------------------------
+		glfwSwapBuffers(window);
+		glfwPollEvents();
     }
 
-    // optional: de-allocate all resources once they've outlived their purpose:
-    // ------------------------------------------------------------------------
-    glDeleteVertexArrays(1, &VAO);
-    glDeleteBuffers(1, &VBO);
-    glDeleteBuffers(1, &EBO);
+	// optional: de-allocate all resources once they've outlived their purpose:
+	// ------------------------------------------------------------------------
+	glDeleteVertexArrays(1, &VAO);
+	glDeleteBuffers(1, &VBO);
+	glDeleteBuffers(1, &EBO);
 
-    // glfw: terminate, clearing all previously allocated GLFW resources.
-    // ------------------------------------------------------------------
-    glfwTerminate();
+	// glfw: terminate, clearing all previously allocated GLFW resources.
+	// ------------------------------------------------------------------
+	glfwTerminate();
 
 	clReleaseMemObject(mem);
 	clReleaseProgram(program);
@@ -294,8 +350,19 @@ int main(int argc, char* argv[]){
 
 void processInput(GLFWwindow *window)
 {
-    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
-        glfwSetWindowShouldClose(window, true);
+
+	if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+	   glfwSetWindowShouldClose(window, true);
+
+	float cameraSpeed = 2.5 * deltaTime;
+	if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+	   cameraPos += cameraSpeed * cameraFront;
+	if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+	   cameraPos -= cameraSpeed * cameraFront;
+	if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+	   cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
+	if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+	   cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
 }
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height)
@@ -324,6 +391,7 @@ std::string getKernelCode(std::string inputFilename){
 
 }
 bool obtainVertexs( const char * path, std::vector<float> &vertexs){
+
 	FILE * file = fopen(path, "r");
 	if(file == NULL) return false;
 	while(1){
@@ -342,3 +410,48 @@ bool obtainVertexs( const char * path, std::vector<float> &vertexs){
 	}
 	return true;
 }
+
+void mouse_callback(GLFWwindow* window, double xpos, double ypos)
+{
+    if (firstMouse)
+    {
+        lastX = xpos;
+        lastY = ypos;
+        firstMouse = false;
+    }
+
+    float xoffset = xpos - lastX;
+    float yoffset = lastY - ypos; // reversed since y-coordinates go from bottom to top
+    lastX = xpos;
+    lastY = ypos;
+
+    float sensitivity = 0.1f; // change this value to your liking
+    xoffset *= sensitivity;
+    yoffset *= sensitivity;
+
+    yaw += xoffset;
+    pitch += yoffset;
+
+    // make sure that when pitch is out of bounds, screen doesn't get flipped
+    if (pitch > 89.0f)
+        pitch = 89.0f;
+    if (pitch < -89.0f)
+        pitch = -89.0f;
+
+    glm::vec3 front;
+    front.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
+    front.y = sin(glm::radians(pitch));
+    front.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
+    cameraFront = glm::normalize(front);
+}
+
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset)
+{
+    if (fov >= 1.0f && fov <= 45.0f)
+        fov -= yoffset;
+    if (fov <= 1.0f)
+        fov = 1.0f;
+    if (fov >= 45.0f)
+        fov = 45.0f;
+}
+

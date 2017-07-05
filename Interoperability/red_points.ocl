@@ -1,6 +1,6 @@
 __kernel void red_points(__write_only image2d_t output,__global float *vertexs)
 {
-	int currentPosition = get_global_id(2);
+	int currentPosition = get_global_id(0);
 	if(currentPosition % 3 == 0){
 		int2 position = (vertexs[currentPosition], vertexs[currentPosition+1]);
 		float4 red = (float4)(1,0,0,0);

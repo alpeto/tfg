@@ -42,8 +42,8 @@ const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
 
 // camera
-glm::vec3 cameraPos   = glm::vec3(-0.5f, 3.0f, 0.5f);
-glm::vec3 cameraFront = glm::vec3(0.2f, -0.95f, -0.2f);
+glm::vec3 cameraPos   = glm::vec3(0.0f, 0.0f, 2.0f);
+glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.00f);
 glm::vec3 cameraUp    = glm::vec3(0.0f, 1.0f, 0.0f);
 
 bool firstMouse = true;
@@ -214,7 +214,7 @@ int main(int argc, char* argv[]){
     // ------------------------------------
     Shader ourShader("inter.vs", "inter.fs");
 
-   // set up vertex data (and buffer(s)) and configure vertex attributes
+  // set up vertex data (and buffer(s)) and configure vertex attributes
     // ------------------------------------------------------------------
     float vertices[] = {
         // positions          // colors           // texture coords
@@ -252,6 +252,7 @@ int main(int argc, char* argv[]){
     glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
     glEnableVertexAttribArray(2);
 
+
     // tell opengl for each sampler to which texture unit it belongs to (only has to be done once)
     // -------------------------------------------------------------------------------------------
     ourShader.use(); // don't forget to activate/use the shader before setting uniforms!
@@ -274,17 +275,12 @@ int main(int argc, char* argv[]){
 
 		// render
 		// ------
-		glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+		glClearColor(1.0f, 1.0f,1.0f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
 
 		// bind textures on corresponding texture units
 		glActiveTexture(texture);
 		glBindTexture(GL_TEXTURE_2D, texture);
-
-		// render container
-//		ourShader.use();
-//		glBindVertexArray(VAO);
-//		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
 		// pass projection matrix to shader (note that in this case it could change every frame)
 		glm::mat4 projection = glm::perspective(glm::radians(fov), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 100.0f);
@@ -295,15 +291,12 @@ int main(int argc, char* argv[]){
 		ourShader.setMat4("view", view);
 
 		// render boxes
-		glBindVertexArray(VAO);
-		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 		std::vector< glm::vec3 > vertexs;
 		vertexs.push_back(glm::vec3(0.97f,  0.97f, 0.0f));
 		vertexs.push_back(glm::vec3(0.97f, -0.97f, 0.0f));
 		vertexs.push_back(glm::vec3(-0.97f, -0.97f, 0.0f));
 		vertexs.push_back(glm::vec3(-0.97f,  0.97f, 0.0f));
-
-		for (unsigned int i = 0; i < vertexs.size(); i++)
+/*		for (unsigned int i = 0; i < vertexs.size(); i++)
 		{
 			// calculate the model matrix for each object and pass it to shader before drawing
 			glm::mat4 model;
@@ -311,15 +304,8 @@ int main(int argc, char* argv[]){
 			float angle = 20.0f * i;
 			model = glm::rotate(model, glm::radians(angle), glm::vec3(1.0f, 0.3f, 0.5f));
 			ourShader.setMat4("model", model);
-		     glDrawArrays(GL_TRIANGLES, 0, 36);   
-		     
-		     std::vector<glm::vec4> temp;
-			temp.push_back(model * view * projection * glm::vec4(vertexs[1],1.0f)); 
-			std::cout<< temp[0].x<< std::endl;   
-		}
-
+		} */
 		
-//       glDrawArrays(GL_POINTS, 0, sizeof(vertices) * sizeof(glm::vec3));*/
 		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
 		// glfw: swap buffers and poll IO events (keys pressed/released, mouse moved etc.)
@@ -350,21 +336,19 @@ int main(int argc, char* argv[]){
 
 void processInput(GLFWwindow *window)
 {
-
 	if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
 	   glfwSetWindowShouldClose(window, true);
 
-	float cameraSpeed = 2.5 * deltaTime;
-	if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-	   cameraPos += cameraSpeed * cameraFront;
-	if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-	   cameraPos -= cameraSpeed * cameraFront;
-	if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-	   cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
-	if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-	   cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
+    float cameraSpeed = 1.5 * deltaTime; 
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+        cameraPos += cameraSpeed * cameraFront;
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+        cameraPos -= cameraSpeed * cameraFront;
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+        cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+        cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
 }
-
 void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 {
     // make sure the viewport matches the new window dimensions; note that width and 

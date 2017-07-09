@@ -24,16 +24,18 @@ cl_platform_id platform_id;
 cl_device_id device_id;
 cl_uint num_of_devices=0;
 cl_kernel kernel_image;
-cl_program program, program2;
-cl_mem mem;	
+cl_program black_background, red_paint, vertexShaderCL;
+cl_mem mem, worldSpaceVertexBuffer, homogenousCoord;	
+cl_mem projectionMatrixBuffer, viewMatrixBuffer;	
 cl_int err;
 size_t global;
 GLuint texture;
-std::string inputKernelFileName = "black_background.ocl";
-std::string inputKernelFileName2 = "red_points.ocl";
+std::string inputBlackBackground = "black_background.ocl";
+std::string inputShadingCL = "red_points.ocl";
+std::string inputVertexShaderCL = "kernel_vertex_shader.ocl";
 
 const char* inputDataFile = "escala.obj";
-int tex_height=1000, tex_width=1000, tex_depth=1;  //Now it is 0, but this variable will be determined by openCL size data.
+int tex_height=1000, tex_width=1000;
 
 #define DATA_SIZE 1000000
 
@@ -41,29 +43,18 @@ int tex_height=1000, tex_width=1000, tex_depth=1;  //Now it is 0, but this varia
 const unsigned int SCR_WIDTH = 800;
 const unsigned int SCR_HEIGHT = 600;
 
-// camera
-glm::vec3 cameraPos   = glm::vec3(0.0f, 0.0f, 2.0f);
-glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, -1.00f);
-glm::vec3 cameraUp    = glm::vec3(0.0f, 1.0f, 0.0f);
-
-bool firstMouse = true;
-float yaw   = -90.0f;	// yaw is initialized to -90.0 degrees since a yaw of 0.0 results in a direction vector pointing to the right so we initially rotate a bit to the left.
-float pitch =  0.0f;
-float lastX =  800.0f / 2.0;
-float lastY =  600.0 / 2.0;
 float fov   =  45.0f;
 
-// timing
-float deltaTime = 0.0f;	// time between current frame and last frame
-float lastFrame = 0.0f;
-
+// camera
+glm::vec3 cameraPos   = glm::vec3(0.0f, 0.0f, 2.0f);
+glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, 1.00f);
+glm::vec3 cameraUp    = glm::vec3(0.0f, 1.0f, 0.0f);
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void processInput(GLFWwindow *window);
 bool obtainVertexs( const char * path, std::vector<float> &vertexs);
-void mouse_callback(GLFWwindow* window, double xpos, double ypos);
-void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
 std::string getKernelCode(std::string);
+void readCompileKernelProgram(std::string inputFileName, cl_program &prog);
 
 int main(int argc, char* argv[]){
     glfwInit();
@@ -84,8 +75,6 @@ int main(int argc, char* argv[]){
     glfwMakeContextCurrent(window);
 
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
-    glfwSetCursorPosCallback(window, mouse_callback);
-    glfwSetScrollCallback(window, scroll_callback);
    
     // tell GLFW to capture our mouse
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
@@ -124,24 +113,9 @@ int main(int argc, char* argv[]){
 	context = clCreateContext(props,1,&device_id,0,0,NULL);
 	queue = clCreateCommandQueue(context,device_id,CL_QUEUE_PROFILING_ENABLE,NULL);
 	
-	std::string a = getKernelCode(inputKernelFileName);
-	const char *ProgramSource = a.c_str();
-	
-	program = clCreateProgramWithSource(context,1,(const char **) &ProgramSource, NULL, &err);
-	std::cout<<"GETTING PROGRAM BLACK BACKGROUND: "<<  getErrorString(err)<< std::endl;
-	// compile the program
-	err = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
-	std::cout<<"BUILDING PROGRAM BLACK BACKGROUND: "<<  getErrorString(err)<< std::endl;
-	
-	a = getKernelCode(inputKernelFileName2);
-	const char *ProgramSource2 = a.c_str();
-
-	program2 = clCreateProgramWithSource(context,1,(const char **) &ProgramSource2, NULL, &err);
-	std::cout<<"GETTING PROGRAM RED_POINTS: "<<  getErrorString(err)<< std::endl;
-	// compile the program
-	err = clBuildProgram(program2, 0, NULL, NULL, NULL, NULL);
-	std::cout<<"BUILDING PROGRAM RED_POINTS: "<<  getErrorString(err)<< std::endl;
-	
+	readCompileKernelProgram(inputBlackBackground, black_background);
+	readCompileKernelProgram(inputShadingCL, red_paint);
+	readCompileKernelProgram(inputVertexShaderCL, vertexShaderCL);
 
 //Create a Vertex Buffer & Reading inputData
 	std::vector<float> v_vertexs;
@@ -153,11 +127,12 @@ int main(int argc, char* argv[]){
 	int nvertexs = v_vertexs.size();
 	float* a_vertexs = &v_vertexs[0];
 
-	cl_mem vertexBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * nvertexs, NULL, &err);
+	worldSpaceVertexBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * nvertexs, NULL, &err);
 	std::cout<<"CREATING BUFFER: "<<  getErrorString(err)<< std::endl;
-	err = clEnqueueWriteBuffer(queue, vertexBuffer, CL_TRUE, 0, sizeof(float) * nvertexs, a_vertexs, 0, NULL, NULL);
+	err = clEnqueueWriteBuffer(queue, worldSpaceVertexBuffer, CL_TRUE, 0, sizeof(float) * nvertexs, a_vertexs, 0, NULL, NULL);
 	std::cout<<"WRITING INPUT DATA TO BUFFER: "<<  getErrorString(err)<< std::endl;
 	clFinish(queue);
+
 
 // 1.Create 2D texture (OpenGL) 
 	//generate the texture ID 
@@ -181,11 +156,54 @@ int main(int argc, char* argv[]){
 	glFinish();
 	clEnqueueAcquireGLObjects(queue, 1,  &mem, 0, 0, NULL); 
 //4 Execute the OpenCL kernel that alters the image
-	kernel_image = clCreateKernel(program, "black_background", &err);
+
+	//4.1 Calculating viewMatrix 
+	glm::mat4 view = glm::lookAt(cameraPos, cameraFront, cameraUp);
+	float *viewMatrix=glm::value_ptr(view);
+	//sqlite3_bind_blob(stmt, 0, viewMatrix, sizeof(viewMatrix), SQLITE_STATIC);
+	
+	//4.2 Calculating projectionMatrix
+	glm::mat4 projection = glm::perspective(glm::radians(fov), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 100.0f);
+	float *projectionMatrix = glm::value_ptr(projection);
+	
+	//4.3 Creating Buffer for viewMatrix
+	viewMatrixBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * 16, NULL, &err);
+	std::cout<<"CREATING BUFFER VIEWMATRIX: "<<  getErrorString(err)<< std::endl;
+	err = clEnqueueWriteBuffer(queue, viewMatrixBuffer, CL_TRUE, 0, sizeof(float) * 16, viewMatrix, 0, NULL, NULL);
+	std::cout<<"WRITING INPUT DATA TO BUFFER: "<<  getErrorString(err)<< std::endl;
+	clFinish(queue);
+
+	//4.4 Creating Buffer for projectionMatrix
+	projectionMatrixBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * 16, NULL, &err);
+	std::cout<<"CREATING BUFFER VIEWMATRIX: "<<  getErrorString(err)<< std::endl;
+	err = clEnqueueWriteBuffer(queue, projectionMatrixBuffer, CL_TRUE, 0, sizeof(float) * 16, projectionMatrix, 0, NULL, NULL);
+	std::cout<<"WRITING INPUT DATA TO BUFFER: "<<  getErrorString(err)<< std::endl;
+	clFinish(queue);
+
+	//4.5 Creating buffer for the output
+	homogenousCoord = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * nvertexs, NULL, &err);
+	std::cout<<"CREATING BUFFER Homogenous Coordinates: "<<  getErrorString(err)<< std::endl;
+
+	kernel_image = clCreateKernel(vertexShaderCL, "vertex_shader", &err);
+	std::cout<<"CREATING KERNEL VERTEX_SHADER: "<<  getErrorString(err)<< std::endl;
+	err = clSetKernelArg(kernel_image, 0, sizeof(cl_mem), &viewMatrixBuffer); 
+	std::cout<<"Setting Kernel Argument viewMatrix: "<<  getErrorString(err)<< std::endl;
+	err = clSetKernelArg(kernel_image, 1, sizeof(cl_mem), &projectionMatrixBuffer); 
+	std::cout<<"Setting Kernel Argument projectionMatrix: "<<  getErrorString(err)<< std::endl;
+	err = clSetKernelArg(kernel_image, 2, sizeof(cl_mem), &worldSpaceVertexBuffer);
+	std::cout<<"Setting Kernel Argument inputBuffer: "<<  getErrorString(err)<< std::endl; 
+	err = clSetKernelArg(kernel_image, 3, sizeof(cl_mem), &homogenousCoord); 
+	std::cout<<"Setting Kernel Argument outputBuffer: "<<  getErrorString(err)<< std::endl;
+	
+	global = nvertexs;
+	err = clEnqueueNDRangeKernel(queue, kernel_image, 1, NULL, &global, NULL, 0, NULL, NULL);
+	std::cout<<"Enqueuing Range Kernel: "<<  getErrorString(err)<< std::endl;
+	
+	
+	kernel_image = clCreateKernel(black_background, "black_background", &err);
 	std::cout<<"CREATING KERNEL BLACK_BACKGROUND: "<<  getErrorString(err)<< std::endl;
 	err = clSetKernelArg(kernel_image, 0, sizeof(cl_mem), &mem); 
 	std::cout<<"Setting Kernel Argument: "<<  getErrorString(err)<< std::endl;
-	//global = DATA_SIZE;
 	
 	size_t globalSizes[] = { (size_t)tex_width,(size_t)tex_height };
 	size_t globalSizesLocal[] = { 1, 1 };
@@ -193,13 +211,16 @@ int main(int argc, char* argv[]){
 	err = clEnqueueNDRangeKernel(queue, kernel_image, 2, NULL, globalSizes, globalSizesLocal, 0, NULL, NULL);  
 	std::cout<<"Enqueuing Range Kernel: "<<  getErrorString(err)<< std::endl;
 	clFinish(queue);
+	
+	
+//Vertex shade phase
 
 	//PAINTING RED THE VERTEXS
-	kernel_image = clCreateKernel(program2, "red_points", &err);
+	kernel_image = clCreateKernel(red_paint, "red_points", &err);
 	std::cout<<"CREATING KERNEL RED_POINTS: "<<  getErrorString(err)<< std::endl;
 	err = clSetKernelArg(kernel_image, 0, sizeof(cl_mem), &mem); 
 	std::cout<<"Setting Kernel Argument(texture): "<<  getErrorString(err)<< std::endl;
-	err = clSetKernelArg(kernel_image, 1, sizeof(vertexBuffer), &vertexBuffer); 
+	err = clSetKernelArg(kernel_image, 1, sizeof(homogenousCoord), &homogenousCoord); 
 	std::cout<<"Setting Kernel Argument(vertexs): "<<  getErrorString(err)<< std::endl;
 	global = nvertexs;
 	err = clEnqueueNDRangeKernel(queue, kernel_image, 1, NULL, &global, NULL, 0, NULL, NULL);  
@@ -218,10 +239,10 @@ int main(int argc, char* argv[]){
     // ------------------------------------------------------------------
     float vertices[] = {
         // positions          // colors           // texture coords
-         0.97f,  0.97f, 0.0f,   1.0f, 1.0f, 1.0f,   1.0f, 1.0f, // top right
-         0.97f, -0.97f, 0.0f,   1.0f, 1.0f, 1.0f,   1.0f, 0.0f, // bottom right
-        -0.97f, -0.97f, 0.0f,   1.0f, 1.0f, 1.0f,   0.0f, 0.0f, // bottom left
-        -0.97f,  0.97f, 0.0f,   1.0f, 1.0f, 1.0f,   0.0f, 1.0f  // top left 
+         1.0f,  1.0f, 0.0f,   1.0f, 1.0f, 1.0f,   1.0f, 1.0f, // top right
+         1.0f, -1.0f, 0.0f,   1.0f, 1.0f, 1.0f,   1.0f, 0.0f, // bottom right
+        -1.0f, -1.0f, 0.0f,   1.0f, 1.0f, 1.0f,   0.0f, 0.0f, // bottom left
+        -1.0f,  1.0f, 0.0f,   1.0f, 1.0f, 1.0f,   0.0f, 1.0f  // top left 
     };
 
     
@@ -265,9 +286,7 @@ int main(int argc, char* argv[]){
 	    
 		// per-frame time logic
 		// --------------------
-		float currentFrame = glfwGetTime();
-		deltaTime = currentFrame - lastFrame;
-		lastFrame = currentFrame;
+
 
 		// input
 		// -----
@@ -282,30 +301,7 @@ int main(int argc, char* argv[]){
 		glActiveTexture(texture);
 		glBindTexture(GL_TEXTURE_2D, texture);
 
-		// pass projection matrix to shader (note that in this case it could change every frame)
-		glm::mat4 projection = glm::perspective(glm::radians(fov), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 100.0f);
-		ourShader.setMat4("projection", projection);
-
-		// camera/view transformation
-		glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
-		ourShader.setMat4("view", view);
-
-		// render boxes
-		std::vector< glm::vec3 > vertexs;
-		vertexs.push_back(glm::vec3(0.97f,  0.97f, 0.0f));
-		vertexs.push_back(glm::vec3(0.97f, -0.97f, 0.0f));
-		vertexs.push_back(glm::vec3(-0.97f, -0.97f, 0.0f));
-		vertexs.push_back(glm::vec3(-0.97f,  0.97f, 0.0f));
-/*		for (unsigned int i = 0; i < vertexs.size(); i++)
-		{
-			// calculate the model matrix for each object and pass it to shader before drawing
-			glm::mat4 model;
-			model = glm::translate(model, vertexs[i]);
-			float angle = 20.0f * i;
-			model = glm::rotate(model, glm::radians(angle), glm::vec3(1.0f, 0.3f, 0.5f));
-			ourShader.setMat4("model", model);
-		} */
-		
+		// render		
 		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
 		// glfw: swap buffers and poll IO events (keys pressed/released, mouse moved etc.)
@@ -325,8 +321,8 @@ int main(int argc, char* argv[]){
 	glfwTerminate();
 
 	clReleaseMemObject(mem);
-	clReleaseProgram(program);
-	clReleaseProgram(program2);
+	clReleaseProgram(black_background);
+	clReleaseProgram(red_paint);
 	clReleaseKernel(kernel_image);
 	clReleaseCommandQueue(queue);
 	clReleaseContext(context);
@@ -338,22 +334,24 @@ void processInput(GLFWwindow *window)
 {
 	if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
 	   glfwSetWindowShouldClose(window, true);
-
-    float cameraSpeed = 1.5 * deltaTime; 
-    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
-        cameraPos += cameraSpeed * cameraFront;
-    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
-        cameraPos -= cameraSpeed * cameraFront;
-    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
-        cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
-    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
-        cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
 }
 void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 {
     // make sure the viewport matches the new window dimensions; note that width and 
     // height will be significantly larger than specified on retina displays.
     glViewport(0, 0, width, height);
+}
+
+void readCompileKernelProgram(std::string inputFileName, cl_program &prog){
+	
+	std::string a = getKernelCode(inputFileName);
+	const char *ProgramSource = a.c_str();
+	
+	prog = clCreateProgramWithSource(context,1,(const char **) &ProgramSource, NULL, &err);
+	std::cout<<"GETTING PROGRAM "<< inputFileName<< ": "<<  getErrorString(err)<< std::endl;
+	// compile the program
+	err = clBuildProgram(prog, 0, NULL, NULL, NULL, NULL);
+	std::cout<<"BUILDING PROGRAM " <<inputFileName<<": "<<  getErrorString(err)<< std::endl;
 }
 
 std::string getKernelCode(std::string inputFilename){
@@ -395,47 +393,4 @@ bool obtainVertexs( const char * path, std::vector<float> &vertexs){
 	return true;
 }
 
-void mouse_callback(GLFWwindow* window, double xpos, double ypos)
-{
-    if (firstMouse)
-    {
-        lastX = xpos;
-        lastY = ypos;
-        firstMouse = false;
-    }
-
-    float xoffset = xpos - lastX;
-    float yoffset = lastY - ypos; // reversed since y-coordinates go from bottom to top
-    lastX = xpos;
-    lastY = ypos;
-
-    float sensitivity = 0.1f; // change this value to your liking
-    xoffset *= sensitivity;
-    yoffset *= sensitivity;
-
-    yaw += xoffset;
-    pitch += yoffset;
-
-    // make sure that when pitch is out of bounds, screen doesn't get flipped
-    if (pitch > 89.0f)
-        pitch = 89.0f;
-    if (pitch < -89.0f)
-        pitch = -89.0f;
-
-    glm::vec3 front;
-    front.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
-    front.y = sin(glm::radians(pitch));
-    front.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
-    cameraFront = glm::normalize(front);
-}
-
-void scroll_callback(GLFWwindow* window, double xoffset, double yoffset)
-{
-    if (fov >= 1.0f && fov <= 45.0f)
-        fov -= yoffset;
-    if (fov <= 1.0f)
-        fov = 1.0f;
-    if (fov >= 45.0f)
-        fov = 45.0f;
-}
 

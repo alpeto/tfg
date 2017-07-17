@@ -192,7 +192,7 @@ int main(int argc, char* argv[])
         std::cout << cameraFront.x << " " << cameraFront.y << " " << cameraFront.z << std::endl;
         std::cout << "Camera Up" << std::endl;
         std::cout << cameraUp.x << " " << cameraUp.y << " " << cameraUp.z << std::endl;
-        std::cout << " "<<std::endl;
+        std::cout << " "<<std::endl;*/
         ourShader.setMat4("view", view);
 
         // render boxes

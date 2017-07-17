@@ -1,12 +1,13 @@
 __kernel void red_points(__write_only image2d_t output,__global float *vertexs)
 {
-	int currentPosition = get_global_id(0);
-	if(currentPosition % 3 == 0){
-		int2 position = (vertexs[currentPosition], vertexs[currentPosition+1]);
-		float4 red = (float4)(1,0,0,0);
-		printf("POSICIONES \n");
-		printf("%i \n",position.x);
-		printf("%i \n",position.y);
-		if(position.x >= 0 && position.y >= 0) write_imagef(output, position, red);	
+	int currentPosition = get_global_id(0)*3;
+	int2 position = (vertexs[currentPosition], vertexs[currentPosition+1]);
+	float4 red = (float4)(1,0,0,0);
+	if(position.x >= 0 && position.y >= 0)
+	{ 
+		write_imagef(output, position, red);
+	}
+	else{
+		printf("%.6f %.6f", vertexs[currentPosition], vertexs[currentPosition+1]);
 	}
 }

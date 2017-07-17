@@ -1,7 +1,7 @@
 all: compile execute_kit
 
 execute_kit:
-	./camera_mouse_zoom "/home/albert/Universidad/TFG/OpenGL/drawModel/kit.obj"
+	./camera_mouse_zoom "/home/albert/Universidad/TFG/OpenGL/drawModel/escala.obj"
 execute_fertility:
 	./camera_mouse_zoom "/home/albert/Universidad/TFG/OpenGL/drawModel/fertility.obj"
 	

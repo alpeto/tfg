@@ -26,7 +26,7 @@ cl_uint num_of_devices=0;
 cl_kernel kernel_image;
 cl_program black_background, red_paint, vertexShaderCL;
 cl_mem mem, worldSpaceVertexBuffer, homogenousCoord;	
-cl_mem projectionMatrixBuffer, viewMatrixBuffer;	
+cl_mem projViewMatrixBuffer;	
 cl_int err;
 size_t global;
 GLuint texture;
@@ -35,19 +35,18 @@ std::string inputShadingCL = "red_points.ocl";
 std::string inputVertexShaderCL = "kernel_vertex_shader.ocl";
 
 const char* inputDataFile = "escala.obj";
-int tex_height=1000, tex_width=1000;
 
 #define DATA_SIZE 1000000
 
 // settings
-const unsigned int SCR_WIDTH = 800;
-const unsigned int SCR_HEIGHT = 600;
+const unsigned int SCR_WIDTH = 1000;
+const unsigned int SCR_HEIGHT = 1000;
 
 float fov   =  45.0f;
 
 // camera
-glm::vec3 cameraPos   = glm::vec3(0.0f, 0.0f, 2.0f);
-glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, 1.00f);
+glm::vec3 cameraPos   = glm::vec3(0.0f, 0.0f, -1500.0f);
+glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, 0.0f);
 glm::vec3 cameraUp    = glm::vec3(0.0f, 1.0f, 0.0f);
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
@@ -134,7 +133,7 @@ int main(int argc, char* argv[]){
 	clFinish(queue);
 
 
-// 1.Create 2D texture (OpenGL) 
+// 1.Create 2D texture for rendering (OpenGL) 
 	//generate the texture ID 
 	glGenTextures(1, &texture); 
 	//bdinding the texture and setting the
@@ -147,36 +146,32 @@ int main(int argc, char* argv[]){
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST); 
 	//specify texture dimensions, format etc
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, tex_width, tex_height, 0, GL_RGBA, GL_FLOAT, 0);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, SCR_WIDTH, SCR_HEIGHT, 0, GL_RGBA, GL_FLOAT, 0);
 
 //2.Create the OpenCL image corresponding to the texture
     mem = clCreateFromGLTexture(context, CL_MEM_WRITE_ONLY, GL_TEXTURE_2D, 0,texture,&err);
     std::cout<<"TAKING FROM GL TEXTURE: "<<  getErrorString(err)<< std::endl;
 //3.Acquire  the ownership via clEnqueueAcquireGLObjects
 	glFinish();
-	clEnqueueAcquireGLObjects(queue, 1,  &mem, 0, 0, NULL); 
+	err = clEnqueueAcquireGLObjects(queue, 1,  &mem, 0, 0, NULL); 
+	std::cout<<"ACQUIRE OWNERSHIP FROM GL: "<<  getErrorString(err)<< std::endl;
 //4 Execute the OpenCL kernel that alters the image
 
 	//4.1 Calculating viewMatrix 
 	glm::mat4 view = glm::lookAt(cameraPos, cameraFront, cameraUp);
-	float *viewMatrix=glm::value_ptr(view);
+
 	//sqlite3_bind_blob(stmt, 0, viewMatrix, sizeof(viewMatrix), SQLITE_STATIC);
-	
 	//4.2 Calculating projectionMatrix
 	glm::mat4 projection = glm::perspective(glm::radians(fov), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 100.0f);
-	float *projectionMatrix = glm::value_ptr(projection);
+		
+	glm::mat4 projView = projection * view;
+	float *projViewMatrix = glm::value_ptr(projView);
 	
-	//4.3 Creating Buffer for viewMatrix
-	viewMatrixBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * 16, NULL, &err);
-	std::cout<<"CREATING BUFFER VIEWMATRIX: "<<  getErrorString(err)<< std::endl;
-	err = clEnqueueWriteBuffer(queue, viewMatrixBuffer, CL_TRUE, 0, sizeof(float) * 16, viewMatrix, 0, NULL, NULL);
-	std::cout<<"WRITING INPUT DATA TO BUFFER: "<<  getErrorString(err)<< std::endl;
-	clFinish(queue);
-
-	//4.4 Creating Buffer for projectionMatrix
-	projectionMatrixBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * 16, NULL, &err);
-	std::cout<<"CREATING BUFFER VIEWMATRIX: "<<  getErrorString(err)<< std::endl;
-	err = clEnqueueWriteBuffer(queue, projectionMatrixBuffer, CL_TRUE, 0, sizeof(float) * 16, projectionMatrix, 0, NULL, NULL);
+	
+	//4.3 Creating Buffer for projViewMatrix
+	projViewMatrixBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * 16, NULL, &err);
+	std::cout<<"CREATING BUFFER PROJVIEWMATRIX: "<<  getErrorString(err)<< std::endl;
+	err = clEnqueueWriteBuffer(queue, projViewMatrixBuffer, CL_TRUE, 0, sizeof(float) * 16, projViewMatrix, 0, NULL, NULL);
 	std::cout<<"WRITING INPUT DATA TO BUFFER: "<<  getErrorString(err)<< std::endl;
 	clFinish(queue);
 
@@ -186,16 +181,18 @@ int main(int argc, char* argv[]){
 
 	kernel_image = clCreateKernel(vertexShaderCL, "vertex_shader", &err);
 	std::cout<<"CREATING KERNEL VERTEX_SHADER: "<<  getErrorString(err)<< std::endl;
-	err = clSetKernelArg(kernel_image, 0, sizeof(cl_mem), &viewMatrixBuffer); 
-	std::cout<<"Setting Kernel Argument viewMatrix: "<<  getErrorString(err)<< std::endl;
-	err = clSetKernelArg(kernel_image, 1, sizeof(cl_mem), &projectionMatrixBuffer); 
+	err = clSetKernelArg(kernel_image, 0, sizeof(cl_mem), &projViewMatrixBuffer); 
 	std::cout<<"Setting Kernel Argument projectionMatrix: "<<  getErrorString(err)<< std::endl;
-	err = clSetKernelArg(kernel_image, 2, sizeof(cl_mem), &worldSpaceVertexBuffer);
+	err = clSetKernelArg(kernel_image, 1, sizeof(cl_mem), &worldSpaceVertexBuffer);
 	std::cout<<"Setting Kernel Argument inputBuffer: "<<  getErrorString(err)<< std::endl; 
-	err = clSetKernelArg(kernel_image, 3, sizeof(cl_mem), &homogenousCoord); 
-	std::cout<<"Setting Kernel Argument outputBuffer: "<<  getErrorString(err)<< std::endl;
-	
-	global = nvertexs;
+	err = clSetKernelArg(kernel_image, 2, sizeof(cl_mem), &homogenousCoord);
+	std::cout<<"Setting Kernel Argument inputBuffer: "<<  getErrorString(err)<< std::endl;  
+	err = clSetKernelArg(kernel_image, 3, sizeof(int), &SCR_WIDTH); 
+	std::cout<<"Setting Kernel Argument Screenwidht: "<<  getErrorString(err)<< std::endl;
+	err = clSetKernelArg(kernel_image, 4, sizeof(int), &SCR_HEIGHT); 
+	std::cout<<"Setting Kernel Argument screenheigh: "<<  getErrorString(err)<< std::endl;
+
+	global = nvertexs/3;
 	err = clEnqueueNDRangeKernel(queue, kernel_image, 1, NULL, &global, NULL, 0, NULL, NULL);
 	std::cout<<"Enqueuing Range Kernel: "<<  getErrorString(err)<< std::endl;
 	
@@ -205,7 +202,7 @@ int main(int argc, char* argv[]){
 	err = clSetKernelArg(kernel_image, 0, sizeof(cl_mem), &mem); 
 	std::cout<<"Setting Kernel Argument: "<<  getErrorString(err)<< std::endl;
 	
-	size_t globalSizes[] = { (size_t)tex_width,(size_t)tex_height };
+	size_t globalSizes[] = { (size_t)SCR_WIDTH,(size_t)SCR_HEIGHT};
 	size_t globalSizesLocal[] = { 1, 1 };
 	
 	err = clEnqueueNDRangeKernel(queue, kernel_image, 2, NULL, globalSizes, globalSizesLocal, 0, NULL, NULL);  
@@ -222,7 +219,7 @@ int main(int argc, char* argv[]){
 	std::cout<<"Setting Kernel Argument(texture): "<<  getErrorString(err)<< std::endl;
 	err = clSetKernelArg(kernel_image, 1, sizeof(homogenousCoord), &homogenousCoord); 
 	std::cout<<"Setting Kernel Argument(vertexs): "<<  getErrorString(err)<< std::endl;
-	global = nvertexs;
+	global = nvertexs/3;
 	err = clEnqueueNDRangeKernel(queue, kernel_image, 1, NULL, &global, NULL, 0, NULL, NULL);  
 	std::cout<<"Enqueuing Range Kernel: "<<  getErrorString(err)<< std::endl;
 	
@@ -245,7 +242,7 @@ int main(int argc, char* argv[]){
         -1.0f,  1.0f, 0.0f,   1.0f, 1.0f, 1.0f,   0.0f, 1.0f  // top left 
     };
 
-    
+  
     unsigned int indices[] = {
         0, 1, 3, // first triangle
         1, 2, 3  // second triangle
@@ -309,6 +306,7 @@ int main(int argc, char* argv[]){
 		glfwSwapBuffers(window);
 		glfwPollEvents();
     }
+    
 
 	// optional: de-allocate all resources once they've outlived their purpose:
 	// ------------------------------------------------------------------------

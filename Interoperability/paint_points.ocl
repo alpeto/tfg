@@ -1,0 +1,8 @@
+__kernel void paint_points(__write_only image2d_t output,__global float *vertexs, __global float *speed)
+{
+	int posSpeed = get_global_id(0);
+	int currentPosition = posSpeed * 3;
+	int2 position = (vertexs[currentPosition], vertexs[currentPosition+1]);
+	float4 color = (float4)(0.2,1,0,0);
+	if(position.x >= 0 && position.y >= 0) write_imagef(output, position, color);
+}

@@ -1,5 +1,0 @@
-__kernel void vertex_shader(__global float* vertexs, __global float* depthImage){
-
-
-
-}

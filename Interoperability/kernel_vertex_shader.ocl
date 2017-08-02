@@ -17,7 +17,6 @@ __kernel void vertex_shader(__constant float* projView, __global float* input, _
 		output[pos] = -FLT_MAX;
 		output[pos+1] = -FLT_MAX;
 		output[pos+2] = INT_MAX;
-		printf("DISCARD \n");
 	}
 	else{
 		output[pos] = (res[0]/res[3]) * sw;

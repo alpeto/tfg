@@ -22,7 +22,7 @@ cl_uint num_of_platforms=0;
 cl_platform_id platform_id;
 cl_device_id device_id;
 cl_uint num_of_devices=0;
-cl_kernel kernel_image;
+cl_kernel kernel_vs, kernel_dt, kernel_fm, kernel_fs, kernel_bb;
 cl_program black_background, fragMerging, vertexShaderCL, fragShader, initializeDepthBuffer;
 cl_mem vertex_image, speedBuffer, colorBuffer, worldSpaceVertexBuffer, homogenousCoord, depthBuffer;	
 cl_mem projViewMatrixBuffer;	
@@ -40,13 +40,23 @@ const char* inputDataFile = "escalaCol.obj";
 std::vector<float> v_vertexs;
 std::vector<float> speed;
 
-#define DATA_SIZE 1000000
+#define DATA_SIZE 40000
 
 // settings
-const unsigned int SCR_WIDTH = 1000;
-const unsigned int SCR_HEIGHT = 1000;
+const unsigned int SCR_WIDTH = 200;
+const unsigned int SCR_HEIGHT = 200;
 
+bool firstMouse = true;
+float yaw   = -90.0f;	// yaw is initialized to -90.0 degrees since a yaw of 0.0 results in a direction vector pointing to the right so we initially rotate a bit to the left.
+float pitch =  0.0f;
+float lastX =  800.0f / 2.0;
+float lastY =  600.0 / 2.0;
 float fov   =  45.0f;
+
+// timing
+float deltaTime = 0.0f;	// time between current frame and last frame
+float lastFrame = 0.0f;
+
 
 // camera
 glm::vec3 cameraPos   = glm::vec3(0.0f, 0.0f, -1500.0f);
@@ -55,10 +65,13 @@ glm::vec3 cameraUp    = glm::vec3(0.0f, 1.0f, 0.0f);
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void processInput(GLFWwindow *window);
+void mouse_callback(GLFWwindow* window, double xpos, double ypos);
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
 bool obtainVertexs( const char * path, std::vector<float> &vertexs,std::vector<float> &speed);
 std::string getKernelCode(std::string);
 void readCompileKernelProgram(std::string inputFileName, cl_program &prog);
 void createBuffers(int nvertexs);
+void initializeKernels();
 
 int main(int argc, char* argv[]){
     glfwInit();
@@ -69,7 +82,7 @@ int main(int argc, char* argv[]){
 
     // glfw window creation
     // --------------------
-    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH, SCR_HEIGHT, "Interoperability", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(SCR_WIDTH*4, SCR_HEIGHT*4, "Interoperability", NULL, NULL);
     if (window == NULL)
     {
         std::cout << "Failed to create GLFW window" << std::endl;
@@ -79,9 +92,11 @@ int main(int argc, char* argv[]){
     glfwMakeContextCurrent(window);
 
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
+    glfwSetCursorPosCallback(window, mouse_callback);
+    glfwSetScrollCallback(window, scroll_callback);
    
     // tell GLFW to capture our mouse
-    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 
     glewExperimental = GL_TRUE; 
     // Initialize GLEW to setup the OpenGL Function pointers
@@ -111,7 +126,8 @@ int main(int argc, char* argv[]){
 
 	// try to get a supported GPU device
 	err = clGetDeviceIDs(platform_id, CL_DEVICE_TYPE_ALL, 1, &device_id, &num_of_devices);
-	std::cout<<"GETTING DEVICES: "<<  getErrorString(err)<< std::endl;
+	checkError(err,"GETTING DEVICES: ");
+
 	
 	//Creating the context and the queue
 	context = clCreateContext(props,1,&device_id,0,0,NULL);
@@ -136,11 +152,11 @@ int main(int argc, char* argv[]){
 	createBuffers(nvertexs);
 	
 	err = clEnqueueWriteBuffer(queue, speedBuffer, CL_TRUE, 0, sizeof(float) * nvertexs/3, a_speed, 0, NULL, NULL);
-	std::cout<<"WRITING INPUT DATA TO BUFFER: "<<  getErrorString(err)<< std::endl;
+	checkError(err,"Writing input data to buffer speedbuffer");
 	clFinish(queue);
 	
 	err = clEnqueueWriteBuffer(queue, worldSpaceVertexBuffer, CL_TRUE, 0, sizeof(float) * nvertexs, a_vertexs, 0, NULL, NULL);
-	std::cout<<"WRITING INPUT DATA TO BUFFER: "<<  getErrorString(err)<< std::endl;
+	checkError(err,"Writing input data to buffer worldSpaceVertexBuffer:");
 	clFinish(queue);
 
 	unsigned int VBO, VAO, EBO;
@@ -161,13 +177,8 @@ int main(int argc, char* argv[]){
 	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, SCR_WIDTH, SCR_HEIGHT, 0, GL_RGBA, GL_FLOAT, 0);
 	//2.Create the OpenCL image corresponding to the texture & depthBuffer
 	vertex_image = clCreateFromGLTexture(context, CL_MEM_WRITE_ONLY, GL_TEXTURE_2D, 0,texture,&err);
-	std::cout<<"TAKING FROM GL TEXTURE: "<<  getErrorString(err)<< std::endl;
-	
-	//3.Acquire  the ownership via clEnqueueAcquireGLObjects
-	glFinish();
-	err = clEnqueueAcquireGLObjects(queue, 1,  &vertex_image, 0, 0, NULL); 
-	std::cout<<"ACQUIRE OWNERSHIP FROM GL: "<<  getErrorString(err)<< std::endl;
-	
+	checkError(err,"Taking from GL Texture:");
+		
 
 	// build and compile our shader zprogram
 	// ------------------------------------
@@ -214,11 +225,11 @@ int main(int argc, char* argv[]){
 
 	// tell opengl for each sampler to which texture unit it belongs to (only has to be done once)
 	// -------------------------------------------------------------------------------------------
-	ourShader.use(); // don't forget to activate/use the shader before setting uniforms!
+	//ourShader.use(); // don't forget to activate/use the shader before setting uniforms!
 	// either set it manually like so:
 	glUniform1i(glGetUniformLocation(ourShader.ID, "texture1"), 0);
 
-
+	initializeKernels();
      // render loop
     // -----------
     while (!glfwWindowShouldClose(window))
@@ -226,6 +237,15 @@ int main(int argc, char* argv[]){
 	    
 		// per-frame time logic
 		// --------------------
+		       float currentFrame = glfwGetTime();
+        deltaTime = currentFrame - lastFrame;
+        lastFrame = currentFrame;
+	
+	//3.Acquire  the ownership via clEnqueueAcquireGLObjects
+	glFinish();
+	err = clEnqueueAcquireGLObjects(queue, 1,  &vertex_image, 0, 0, NULL); 
+	checkError(err,"Acquire Ownership from GL:");
+	
 	//4 Execute the OpenCL kernel that alters the image
 
 	//4.1 Calculating viewMatrix 
@@ -240,83 +260,42 @@ int main(int argc, char* argv[]){
 
 
 	//4.3 Writing Buffer for projViewMatrix
-
 	err = clEnqueueWriteBuffer(queue, projViewMatrixBuffer, CL_TRUE, 0, sizeof(float) * 16, projViewMatrix, 0, NULL, NULL);
-	std::cout<<"WRITING INPUT DATA TO BUFFER: "<<  getErrorString(err)<< std::endl;
+	checkError(err,"Writing input data to projViewMatrixBuffer: ");
 	clFinish(queue);
 
-	//4.5 Writing buffer for the output
-
-	kernel_image = clCreateKernel(vertexShaderCL, "vertex_shader", &err);
-	std::cout<<"CREATING KERNEL VERTEX_SHADER: "<<  getErrorString(err)<< std::endl;
-	err = clSetKernelArg(kernel_image, 0, sizeof(cl_mem), &projViewMatrixBuffer); 
-	std::cout<<"Setting Kernel Argument projectionMatrix: "<<  getErrorString(err)<< std::endl;
-	err = clSetKernelArg(kernel_image, 1, sizeof(cl_mem), &worldSpaceVertexBuffer);
-	std::cout<<"Setting Kernel Argument inputBuffer: "<<  getErrorString(err)<< std::endl; 
-	err = clSetKernelArg(kernel_image, 2, sizeof(cl_mem), &homogenousCoord);
-	std::cout<<"Setting Kernel Argument outputBuffer: "<<  getErrorString(err)<< std::endl;  
-	err = clSetKernelArg(kernel_image, 3, sizeof(int), &SCR_WIDTH); 
-	std::cout<<"Setting Kernel Argument ScreenWidht: "<<  getErrorString(err)<< std::endl;
-	err = clSetKernelArg(kernel_image, 4, sizeof(int), &SCR_HEIGHT); 
-	std::cout<<"Setting Kernel Argument ScreenHeight: "<<  getErrorString(err)<< std::endl;
-
+	//4.5 Transforming coordinates
 	global = nvertexs/3;
-	err = clEnqueueNDRangeKernel(queue, kernel_image, 1, NULL, &global, NULL, 0, NULL, NULL);
-	std::cout<<"Enqueuing Range Kernel: "<<  getErrorString(err)<< std::endl;
+	err = clEnqueueNDRangeKernel(queue, kernel_vs, 1, NULL, &global, NULL, 0, NULL, NULL);
+	checkError(err,"Enqueing Range Kernel in Vertex Shader");
 
 	//Painting the background black
-	kernel_image = clCreateKernel(black_background, "black_background", &err);
-	std::cout<<"CREATING KERNEL BLACK_BACKGROUND: "<<  getErrorString(err)<< std::endl;
-	err = clSetKernelArg(kernel_image, 0, sizeof(cl_mem), &vertex_image); 
-	std::cout<<"Setting Kernel Argument: "<<  getErrorString(err)<< std::endl;
-
 	size_t globalSizes[] = { (size_t)SCR_WIDTH,(size_t)SCR_HEIGHT};
 	size_t globalSizesLocal[] = { 1, 1 };
 
-	err = clEnqueueNDRangeKernel(queue, kernel_image, 2, NULL, globalSizes, globalSizesLocal, 0, NULL, NULL);  
-	std::cout<<"Enqueuing Range Kernel: "<<  getErrorString(err)<< std::endl;
+	err = clEnqueueNDRangeKernel(queue, kernel_bb, 2, NULL, globalSizes, globalSizesLocal, 0, NULL, NULL);  
+	checkError(err,"Enqueing Range Kernel BlackBackground:");
 	clFinish(queue);
 
 	//InitializeDepthBuffer
-	kernel_image = clCreateKernel(initializeDepthBuffer, "initializeDepthBuffer", &err);
-	std::cout<<"CREATING KERNEL InitializeDepthBuffer: "<<  getErrorString(err)<< std::endl;
-	err = clSetKernelArg(kernel_image, 0, sizeof(depthBuffer), &depthBuffer); 
-	std::cout<<"Setting Kernel Argument(depthBuffer): "<<  getErrorString(err)<< std::endl;
 	global = nvertexs/3;
-	err = clEnqueueNDRangeKernel(queue, kernel_image, 1, NULL, &global, NULL, 0, NULL, NULL);
-	std::cout<<"Enqueuing Range Kernel: "<<  getErrorString(err)<< std::endl;
+	err = clEnqueueNDRangeKernel(queue, kernel_dt, 1, NULL, &global, NULL, 0, NULL, NULL);
+	checkError(err,"Enqueuing Range Kernel Initialize depthbuffer:");
 
 	//FragmentShader
-	kernel_image = clCreateKernel(fragShader, "fragShader", &err);
-	std::cout<<"CREATING KERNEL FragShader: "<<  getErrorString(err)<< std::endl;
-	err = clSetKernelArg(kernel_image, 0, sizeof(speedBuffer), &speedBuffer); 
-	std::cout<<"Setting Kernel Argument(speedBuffer): "<<  getErrorString(err)<< std::endl;
-	err = clSetKernelArg(kernel_image, 1, sizeof(colorBuffer), &colorBuffer); 
-	std::cout<<"Setting Kernel Argument(colorBuffer): "<<  getErrorString(err)<< std::endl;
 	global = nvertexs/3;
-	err = clEnqueueNDRangeKernel(queue, kernel_image, 1, NULL, &global, NULL, 0, NULL, NULL);
-	std::cout<<"Enqueuing Range Kernel: "<<  getErrorString(err)<< std::endl;
+	err = clEnqueueNDRangeKernel(queue, kernel_fs, 1, NULL, &global, NULL, 0, NULL, NULL);
+	checkError(err,"Enqueuing rangeKernel FragmentShader: ");
 
 	//Fragment merging
-	kernel_image = clCreateKernel(fragMerging, "fragMerging", &err);
-	std::cout<<"CREATING KERNEL FragMerging: "<<  getErrorString(err)<< std::endl;
-	err = clSetKernelArg(kernel_image, 0, sizeof(cl_mem), &vertex_image); 
-	std::cout<<"Setting Kernel Argument(texture): "<<  getErrorString(err)<< std::endl;
-	err = clSetKernelArg(kernel_image, 1, sizeof(homogenousCoord), &homogenousCoord); 
-	std::cout<<"Setting Kernel Argument(vertexs): "<<  getErrorString(err)<< std::endl;
-	err = clSetKernelArg(kernel_image, 2, sizeof(colorBuffer), &colorBuffer); 
-	std::cout<<"Setting Kernel Argument(speed): "<<  getErrorString(err)<< std::endl;
-	err = clSetKernelArg(kernel_image, 3, sizeof(depthBuffer), &depthBuffer); 
-	std::cout<<"Setting Kernel Argument(depthBuffer): "<<  getErrorString(err)<< std::endl;
-
 	global = nvertexs/3;
-	err = clEnqueueNDRangeKernel(queue, kernel_image, 1, NULL, &global, NULL, 0, NULL, NULL);  
-	std::cout<<"Enqueuing Range Kernel: "<<  getErrorString(err)<< std::endl;
+	err = clEnqueueNDRangeKernel(queue, kernel_fm, 1, NULL, &global, NULL, 0, NULL, NULL);  
+	checkError(err,"Enqueing Range Kernel FragmentMerging");
 
 	//5. Releasing the ownership via clEnqueueReleaseGLObjects
 	clFinish(queue);
 	err = clEnqueueReleaseGLObjects(queue, 1,  &vertex_image, 0, 0, NULL); 
-	std::cout<<"RELEASING ENQUEUE OBJECTS: "<<  getErrorString(err)<< std::endl;
+	checkError(err,"Releasing Enqueuing objects: ");
 		// input
 		// -----
 		processInput(window);
@@ -329,6 +308,8 @@ int main(int argc, char* argv[]){
 		// bind textures on corresponding texture units
 		glActiveTexture(texture);
 		glBindTexture(GL_TEXTURE_2D, texture);
+	
+		ourShader.use();
 
 		// render		
 		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
@@ -352,7 +333,12 @@ int main(int argc, char* argv[]){
 	clReleaseMemObject(vertex_image);
 	clReleaseProgram(black_background);
 	clReleaseProgram(fragMerging);
-	clReleaseKernel(kernel_image);
+	clReleaseKernel(kernel_dt);
+	clReleaseKernel(kernel_fm);
+	clReleaseKernel(kernel_vs);
+	clReleaseKernel(kernel_bb);
+	clReleaseKernel(kernel_fs);
+
 	clReleaseCommandQueue(queue);
 	clReleaseContext(context);
 
@@ -361,8 +347,18 @@ int main(int argc, char* argv[]){
 
 void processInput(GLFWwindow *window)
 {
-	if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
-	   glfwSetWindowShouldClose(window, true);
+    if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
+        glfwSetWindowShouldClose(window, true);
+
+    float cameraSpeed = 1000 * deltaTime;
+    if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
+        cameraPos += cameraSpeed * cameraFront;
+    if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
+        cameraPos -= cameraSpeed * cameraFront;
+    if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS)
+        cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
+    if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS)
+        cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
 }
 void framebuffer_size_callback(GLFWwindow* window, int width, int height)
 {
@@ -377,10 +373,11 @@ void readCompileKernelProgram(std::string inputFileName, cl_program &prog){
 	const char *ProgramSource = a.c_str();
 	
 	prog = clCreateProgramWithSource(context,1,(const char **) &ProgramSource, NULL, &err);
-	std::cout<<"GETTING PROGRAM "<< inputFileName<< ": "<<  getErrorString(err)<< std::endl;
+	checkError(err,"Getting program " + inputFileName);
+	
 	// compile the program
 	err = clBuildProgram(prog, 0, NULL, NULL, NULL, NULL);
-	std::cout<<"BUILDING PROGRAM " <<inputFileName<<": "<<  getErrorString(err)<< std::endl;
+	checkError(err,"Building program " + inputFileName);
 }
 
 std::string getKernelCode(std::string inputFilename){
@@ -424,22 +421,119 @@ bool obtainVertexs( const char * path, std::vector<float> &vertexs, std::vector<
 
 void createBuffers(int nvertexs){
 	speedBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * nvertexs / 3, NULL, &err);
-	std::cout<<"CREATING BUFFER speedBuffer: "<<  getErrorString(err)<< std::endl;
+	checkError(err,"Creating Buffer speedBuffer");
 	clFinish(queue);
 	
 	colorBuffer = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * nvertexs, NULL, &err);
-	std::cout<<"CREATING BUFFER colorBuffer: "<<  getErrorString(err)<< std::endl;
+	checkError(err,"Creating buffer colorBuffer");
 	
 	worldSpaceVertexBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * nvertexs, NULL, &err);
-	std::cout<<"CREATING BUFFER worldSpaceVertexBuffer: "<<  getErrorString(err)<< std::endl;
+	checkError(err,"Creating buffer worldSpaceVertexBuffer");
 	
 	depthBuffer = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * nvertexs/3, NULL, &err);
-	std::cout<<"CREATING BUFFER depthBuffer: "<<  getErrorString(err)<< std::endl;
+	checkError(err,"Creating buffer DepthBuffer: ");
 	
 	homogenousCoord = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * nvertexs, NULL, &err);
-	std::cout<<"CREATING BUFFER Homogenous Coordinates: "<<  getErrorString(err)<< std::endl;
+	checkError(err,"Creating buffer Homogenous Coordinates: ");
 	
 	projViewMatrixBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * 16, NULL, &err);
-	std::cout<<"CREATING BUFFER projViewMatrixBuffer: "<<  getErrorString(err)<< std::endl;
+	checkError(err,"Creating buffer projViewMatrixBuffer: ");
 	
 }
+
+void mouse_callback(GLFWwindow* window, double xpos, double ypos)
+{
+    if (firstMouse)
+    {
+        lastX = xpos;
+        lastY = ypos;
+        firstMouse = false;
+    }
+
+    float xoffset = xpos - lastX;
+    float yoffset = lastY - ypos; // reversed since y-coordinates go from bottom to top
+    lastX = xpos;
+    lastY = ypos;
+
+    float sensitivity = 0.1f; // change this value to your liking
+    xoffset *= sensitivity;
+    yoffset *= sensitivity;
+
+    yaw += xoffset;
+    pitch += yoffset;
+
+    // make sure that when pitch is out of bounds, screen doesn't get flipped
+    if (pitch > 89.0f)
+        pitch = 89.0f;
+    if (pitch < -89.0f)
+        pitch = -89.0f;
+
+    glm::vec3 front;
+    front.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
+    front.y = sin(glm::radians(pitch));
+    front.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
+    cameraFront = glm::normalize(front);
+}
+
+// glfw: whenever the mouse scroll wheel scrolls, this callback is called
+// ----------------------------------------------------------------------
+void scroll_callback(GLFWwindow* window, double xoffset, double yoffset)
+{
+    if (fov >= 1.0f && fov <= 45.0f)
+        fov -= yoffset;
+    if (fov <= 1.0f)
+        fov = 1.0f;
+    if (fov >= 45.0f)
+        fov = 45.0f;
+}
+
+
+void initializeKernels(){
+	
+	//Kernel BlackBackground
+	kernel_bb = clCreateKernel(black_background, "black_background", &err);
+	checkError(err,"Creating kernel Black_background:");
+	err = clSetKernelArg(kernel_bb, 0, sizeof(cl_mem), &vertex_image); 
+	checkError(err,"Setting Kernel Argument of black_background:");
+	
+	//Kernel Vertex Shader
+	kernel_vs = clCreateKernel(vertexShaderCL, "vertex_shader", &err);
+	err = clSetKernelArg(kernel_vs, 0, sizeof(cl_mem), &projViewMatrixBuffer); 
+	checkError(err,"Setting Kernel Argument (projectionMatrix) in Vertex Shader");
+	err = clSetKernelArg(kernel_vs, 1, sizeof(cl_mem), &worldSpaceVertexBuffer);
+	checkError(err,"Setting Kernel Argument (worldSpaceVertexBuffer) in Vertex Shader");
+	err = clSetKernelArg(kernel_vs, 2, sizeof(cl_mem), &homogenousCoord);
+	checkError(err,"Setting Kernel Argument (homogenousCoord) in Vertex Shader");  
+	checkError(err,"Creating Kernel Vertex Shader");
+	err = clSetKernelArg(kernel_vs, 3, sizeof(int), &SCR_WIDTH); 
+	checkError(err,"Setting Kernel Argument (ScreenWidth) in Vertex Shader");
+	err = clSetKernelArg(kernel_vs, 4, sizeof(int), &SCR_HEIGHT); 
+	checkError(err,"Setting Kernel Argument (ScreenHeight) in Vertex Shader");
+	
+	//Kernel DepthTest
+	kernel_dt = clCreateKernel(initializeDepthBuffer, "initializeDepthBuffer", &err);
+	checkError(err,"Creating kernel InitializeDepthBuffer: ");
+	err = clSetKernelArg(kernel_dt, 0, sizeof(depthBuffer), &depthBuffer); 
+	checkError(err,"Setting Kernel Argument(depthBuffer) initialize depthbuffer:");
+	
+	//Kernel Fragment Shader
+	kernel_fs = clCreateKernel(fragShader, "fragShader", &err);
+	checkError(err,"CREATING KERNEL FragShader: ");
+	err = clSetKernelArg(kernel_fs, 0, sizeof(speedBuffer), &speedBuffer); 
+	checkError(err,"Setting Kernel Argument(speedBuffer):");
+	err = clSetKernelArg(kernel_fs, 1, sizeof(colorBuffer), &colorBuffer); 
+	checkError(err,"Setting Kernel Argument(colorBuffer) in FragmentShader: ");
+	
+	//Kernel Fragment Merging
+	kernel_fm = clCreateKernel(fragMerging, "fragMerging", &err);
+	checkError(err,"Creating Kernel FragMerging:");
+	err = clSetKernelArg(kernel_fm, 0, sizeof(cl_mem), &vertex_image); 
+	checkError(err,"Setting Kernel Argument (texture) in FragmentMerging");
+	err = clSetKernelArg(kernel_fm, 1, sizeof(homogenousCoord), &homogenousCoord); 
+	checkError(err,"Setting Kernel Argument (vertexs) in FragmentMerging");	
+	err = clSetKernelArg(kernel_fm, 2, sizeof(colorBuffer), &colorBuffer); 
+	checkError(err,"Setting Kernel Argument (colorBuffer) in FragmentMerging");
+	err = clSetKernelArg(kernel_fm, 3, sizeof(depthBuffer), &depthBuffer); 
+	checkError(err,"Setting Kernel Argument (depthBuffer) in FragmentMerging");
+}
+

@@ -1,3 +1,5 @@
+
+
 const char *getErrorString(cl_int error)
 {
 	switch(error){
@@ -75,3 +77,8 @@ const char *getErrorString(cl_int error)
 	    }
 }
 
+void checkError(cl_int error, std::string message){
+	if(strcmp("CL_SUCCESS",getErrorString(error)) != 0){
+		std::cout<< message<< " " << getErrorString(error)<<std::endl	;
+	}
+}

@@ -3,6 +3,9 @@
 #include "CL/cl.h"
 #include "CL/cl_gl.h"
 
+#pragma OPENCL EXTENSION cl_khr_local_int32_extended_atomics : enable
+#pragma OPENCL EXTENSION cl_khr_global_int32_extended_atomics : enable
+
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
@@ -35,7 +38,7 @@ std::string inputFragMerging = "fragMerging.ocl";
 std::string inputVertexShaderCL = "kernel_vertex_shader.ocl";
 std::string inputInitializeDepthBuffer = "initializeDepthBuffer.ocl";
 
-const char* inputDataFile = "escalaCol.obj";
+const char* inputDataFile = "escalaColPeq.obj";
 
 std::vector<float> v_vertexs;
 std::vector<float> speed;
@@ -59,7 +62,7 @@ float lastFrame = 0.0f;
 
 
 // camera
-glm::vec3 cameraPos   = glm::vec3(0.0f, 0.0f, -1500.0f);
+glm::vec3 cameraPos   = glm::vec3(0.0f, 0.0f, -500.0f);
 glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, 0.0f);
 glm::vec3 cameraUp    = glm::vec3(0.0f, 1.0f, 0.0f);
 
@@ -70,7 +73,7 @@ void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
 bool obtainVertexs( const char * path, std::vector<float> &vertexs,std::vector<float> &speed);
 std::string getKernelCode(std::string);
 void readCompileKernelProgram(std::string inputFileName, cl_program &prog);
-void createBuffers(int nvertexs);
+void createBuffers(int ncoord, int nvertex);
 void initializeKernels();
 
 int main(int argc, char* argv[]){
@@ -146,16 +149,18 @@ int main(int argc, char* argv[]){
 		std::cout<<"Error reading the input data file"<<std::endl;
 		return 1;
 	}
-	int nvertexs = v_vertexs.size();
+	int ncoord = v_vertexs.size();
+	int nvertex = ncoord / 3;
+	
 	float* a_vertexs = &v_vertexs[0];
 	float* a_speed = &speed[0];
-	createBuffers(nvertexs);
+	createBuffers(ncoord,nvertex);
 	
-	err = clEnqueueWriteBuffer(queue, speedBuffer, CL_TRUE, 0, sizeof(float) * nvertexs/3, a_speed, 0, NULL, NULL);
+	err = clEnqueueWriteBuffer(queue, speedBuffer, CL_TRUE, 0, sizeof(float) * (nvertex), a_speed, 0, NULL, NULL);
 	checkError(err,"Writing input data to buffer speedbuffer");
 	clFinish(queue);
 	
-	err = clEnqueueWriteBuffer(queue, worldSpaceVertexBuffer, CL_TRUE, 0, sizeof(float) * nvertexs, a_vertexs, 0, NULL, NULL);
+	err = clEnqueueWriteBuffer(queue, worldSpaceVertexBuffer, CL_TRUE, 0, sizeof(float) * ncoord, a_vertexs, 0, NULL, NULL);
 	checkError(err,"Writing input data to buffer worldSpaceVertexBuffer:");
 	clFinish(queue);
 
@@ -237,69 +242,70 @@ int main(int argc, char* argv[]){
 	    
 		// per-frame time logic
 		// --------------------
-		       float currentFrame = glfwGetTime();
-        deltaTime = currentFrame - lastFrame;
-        lastFrame = currentFrame;
+		float currentFrame = glfwGetTime();
+		deltaTime = currentFrame - lastFrame;
+		lastFrame = currentFrame;
 	
-	//3.Acquire  the ownership via clEnqueueAcquireGLObjects
-	glFinish();
-	err = clEnqueueAcquireGLObjects(queue, 1,  &vertex_image, 0, 0, NULL); 
-	checkError(err,"Acquire Ownership from GL:");
-	
-	//4 Execute the OpenCL kernel that alters the image
-
-	//4.1 Calculating viewMatrix 
-	glm::mat4 view = glm::lookAt(cameraPos, cameraFront, cameraUp);
-
-	//sqlite3_bind_blob(stmt, 0, viewMatrix, sizeof(viewMatrix), SQLITE_STATIC);
-	//4.2 Calculating projectionMatrix
-	glm::mat4 projection = glm::perspective(glm::radians(fov), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 100.0f);
+		//3.Acquire  the ownership via clEnqueueAcquireGLObjects
+		glFinish();
+		err = clEnqueueAcquireGLObjects(queue, 1,  &vertex_image, 0, 0, NULL); 
+		checkError(err,"Acquire Ownership from GL:");
 		
-	glm::mat4 projView = projection * view;
-	float *projViewMatrix = glm::value_ptr(projView);
+		//4 Execute the OpenCL kernel that alters the image
+
+		//4.1 Calculating viewMatrix 
+		glm::mat4 view = glm::lookAt(cameraPos, cameraFront, cameraUp);
+
+		//sqlite3_bind_blob(stmt, 0, viewMatrix, sizeof(viewMatrix), SQLITE_STATIC);
+		//4.2 Calculating projectionMatrix
+		glm::mat4 projection = glm::perspective(glm::radians(fov), (float)SCR_WIDTH / (float)SCR_HEIGHT, 0.1f, 100.0f);
+			
+		glm::mat4 projView = projection * view;
+		float *projViewMatrix = glm::value_ptr(projView);
 
 
-	//4.3 Writing Buffer for projViewMatrix
-	err = clEnqueueWriteBuffer(queue, projViewMatrixBuffer, CL_TRUE, 0, sizeof(float) * 16, projViewMatrix, 0, NULL, NULL);
-	checkError(err,"Writing input data to projViewMatrixBuffer: ");
-	clFinish(queue);
+		//4.3 Writing Buffer for projViewMatrix
+		err = clEnqueueWriteBuffer(queue, projViewMatrixBuffer, CL_TRUE, 0, sizeof(float) * 16, projViewMatrix, 0, NULL, NULL);
+		checkError(err,"Writing input data to projViewMatrixBuffer: ");
+		clFinish(queue);
 
-	//4.5 Transforming coordinates
-	global = nvertexs/3;
-	err = clEnqueueNDRangeKernel(queue, kernel_vs, 1, NULL, &global, NULL, 0, NULL, NULL);
-	checkError(err,"Enqueing Range Kernel in Vertex Shader");
+		//4.5 Transforming coordinates
+		global = nvertex;
+		err = clEnqueueNDRangeKernel(queue, kernel_vs, 1, NULL, &global, NULL, 0, NULL, NULL);
+		checkError(err,"Enqueing Range Kernel in Vertex Shader");
 
-	//Painting the background black
-	size_t globalSizes[] = { (size_t)SCR_WIDTH,(size_t)SCR_HEIGHT};
-	size_t globalSizesLocal[] = { 1, 1 };
+		//Painting the background black
+		size_t globalSizes[] = { (size_t)SCR_WIDTH,(size_t)SCR_HEIGHT};
+		size_t globalSizesLocal[] = { 1, 1 };
 
-	err = clEnqueueNDRangeKernel(queue, kernel_bb, 2, NULL, globalSizes, globalSizesLocal, 0, NULL, NULL);  
-	checkError(err,"Enqueing Range Kernel BlackBackground:");
-	clFinish(queue);
+		err = clEnqueueNDRangeKernel(queue, kernel_bb, 2, NULL, globalSizes, globalSizesLocal, 0, NULL, NULL);  
+		checkError(err,"Enqueing Range Kernel BlackBackground:");
+		clFinish(queue);
 
-	//InitializeDepthBuffer
-	global = nvertexs/3;
-	err = clEnqueueNDRangeKernel(queue, kernel_dt, 1, NULL, &global, NULL, 0, NULL, NULL);
-	checkError(err,"Enqueuing Range Kernel Initialize depthbuffer:");
+		//InitializeDepthBuffer
+		global = SCR_HEIGHT * SCR_WIDTH;
+		err = clEnqueueNDRangeKernel(queue, kernel_dt, 1, NULL, &global, NULL, 0, NULL, NULL);
+		checkError(err,"Enqueuing Range Kernel Initialize depthbuffer:");
 
-	//FragmentShader
-	global = nvertexs/3;
-	err = clEnqueueNDRangeKernel(queue, kernel_fs, 1, NULL, &global, NULL, 0, NULL, NULL);
-	checkError(err,"Enqueuing rangeKernel FragmentShader: ");
+		//FragmentShader
+		global = nvertex;
+		err = clEnqueueNDRangeKernel(queue, kernel_fs, 1, NULL, &global, NULL, 0, NULL, NULL);
+		checkError(err,"Enqueuing rangeKernel FragmentShader: ");
+		std::cout<<" -------------"<< std::endl;
 
-	//Fragment merging
-	global = nvertexs/3;
-	err = clEnqueueNDRangeKernel(queue, kernel_fm, 1, NULL, &global, NULL, 0, NULL, NULL);  
-	checkError(err,"Enqueing Range Kernel FragmentMerging");
+		//Fragment merging
+		global = nvertex;
+		err = clEnqueueNDRangeKernel(queue, kernel_fm, 1, NULL, &global, NULL, 0, NULL, NULL);  
+		checkError(err,"Enqueing Range Kernel FragmentMerging");
 
-	//5. Releasing the ownership via clEnqueueReleaseGLObjects
-	clFinish(queue);
-	err = clEnqueueReleaseGLObjects(queue, 1,  &vertex_image, 0, 0, NULL); 
-	checkError(err,"Releasing Enqueuing objects: ");
+		//5. Releasing the ownership via clEnqueueReleaseGLObjects
+		clFinish(queue);
+		err = clEnqueueReleaseGLObjects(queue, 1,  &vertex_image, 0, 0, NULL); 
+		checkError(err,"Releasing Enqueuing objects: ");
 		// input
 		// -----
 		processInput(window);
-
+		
 		// render
 		// ------
 		glClearColor(1.0f, 1.0f,1.0f, 1.0f);
@@ -419,21 +425,21 @@ bool obtainVertexs( const char * path, std::vector<float> &vertexs, std::vector<
 	return true;
 }
 
-void createBuffers(int nvertexs){
-	speedBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * nvertexs / 3, NULL, &err);
+void createBuffers(int ncoord, int nvertex){
+	speedBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * nvertex, NULL, &err);
 	checkError(err,"Creating Buffer speedBuffer");
 	clFinish(queue);
 	
-	colorBuffer = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * nvertexs, NULL, &err);
+	colorBuffer = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * ncoord, NULL, &err);
 	checkError(err,"Creating buffer colorBuffer");
 	
-	worldSpaceVertexBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * nvertexs, NULL, &err);
+	worldSpaceVertexBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * ncoord, NULL, &err);
 	checkError(err,"Creating buffer worldSpaceVertexBuffer");
 	
-	depthBuffer = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * nvertexs/3, NULL, &err);
+	depthBuffer = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(int) * SCR_HEIGHT * SCR_WIDTH, NULL, &err);
 	checkError(err,"Creating buffer DepthBuffer: ");
 	
-	homogenousCoord = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * nvertexs, NULL, &err);
+	homogenousCoord = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * ncoord, NULL, &err);
 	checkError(err,"Creating buffer Homogenous Coordinates: ");
 	
 	projViewMatrixBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * 16, NULL, &err);
@@ -534,6 +540,8 @@ void initializeKernels(){
 	err = clSetKernelArg(kernel_fm, 2, sizeof(colorBuffer), &colorBuffer); 
 	checkError(err,"Setting Kernel Argument (colorBuffer) in FragmentMerging");
 	err = clSetKernelArg(kernel_fm, 3, sizeof(depthBuffer), &depthBuffer); 
+	checkError(err,"Setting Kernel Argument (depthBuffer) in FragmentMerging");
+	err = clSetKernelArg(kernel_fm, 4, sizeof(SCR_WIDTH), &SCR_WIDTH); 
 	checkError(err,"Setting Kernel Argument (depthBuffer) in FragmentMerging");
 }
 

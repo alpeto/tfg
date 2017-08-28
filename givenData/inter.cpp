@@ -62,8 +62,8 @@ float lastFrame = 0.0f;
 
 
 // camera
-glm::vec3 cameraPos   = glm::vec3(0.0f, 0.0f, 100.0f);
-glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, 1.0f);
+glm::vec3 cameraPos   = glm::vec3(-10.0f, 0.0f, 100.0f);
+glm::vec3 cameraFront = glm::vec3(1.0f, 1.0f, 1.0f);
 glm::vec3 cameraUp    = glm::vec3(0.0f, 1.0f, 0.0f);
 
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
@@ -355,7 +355,7 @@ void processInput(GLFWwindow *window)
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
 
-    float cameraSpeed = deltaTime;
+    float cameraSpeed = 10 * deltaTime;
     if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
         cameraPos += cameraSpeed * cameraFront;
     if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
@@ -417,7 +417,6 @@ bool obtainVertexs( const char * path, std::vector<float> &vertexs, std::vector<
 	if(file == NULL) return false;
 	while(1){
 		float x,y,z,s;
-		char lineHeader[128];
 		int res = fscanf(file, "%f %f %f %f\n", &x, &y, &z, &s);	
 		if (res == EOF) break;
 		else{

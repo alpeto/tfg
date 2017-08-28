@@ -20,7 +20,6 @@ __kernel void vertex_shader(__constant float* projView, __global float* input, _
 		output[pos+2] = INT_MAX;
 	}
 	else{
-		
 		output[pos] = (res[0]/res[3]) * sw;
 		output[pos+1] = (res[1]/res[3])  * sh;
 		output[pos+2] = (res[2]/res[3])  * sh;

@@ -43,11 +43,11 @@ const char* inputDataFile = "escalaColPeq.obj";
 std::vector<float> v_vertexs;
 std::vector<float> speed;
 
-#define DATA_SIZE 40000
+#define DATA_SIZE 1000000
 
 // settings
-const unsigned int SCR_WIDTH = 200;
-const unsigned int SCR_HEIGHT = 200;
+const unsigned int SCR_WIDTH = 1000;
+const unsigned int SCR_HEIGHT = 1000;
 
 bool firstMouse = true;
 float yaw   = -90.0f;	// yaw is initialized to -90.0 degrees since a yaw of 0.0 results in a direction vector pointing to the right so we initially rotate a bit to the left.

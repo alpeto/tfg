@@ -1,17 +1,18 @@
 __kernel void vertex_shader(__constant float* projView, __global float* input, __global float* output, int sw, int sh)
 {
-	int pos = get_global_id(0) *3;
+	int pos = get_global_id(0) * 3;
 	float res[4] = {0.0f,0.0f,0.0f,0.0f};
 	float coord[4] = {input[pos],input[pos+1],input[pos+2],1.0f};	
 	for(int i = 0; i < 4; i++)
 	{
 		for(int j = 0; j < 4; j++)
 		{
-			int pos = (i * 4) + j;
-			res[i] += (projView[pos] * coord[j]); 
+			int matrixp = (i * 4) + j;
+			res[i] += (projView[matrixp] * coord[j]); 
 		}
 	} 
-
+	
+	
 	if(-res[3] > res[0] || res[3] < res[0] || -res[3] > res[1] || res[3] < res[1] || -res[3] > res[2] || res[3] < res[2])
 	{
 		output[pos] = -FLT_MAX;
@@ -19,6 +20,7 @@ __kernel void vertex_shader(__constant float* projView, __global float* input, _
 		output[pos+2] = INT_MAX;
 	}
 	else{
+		
 		output[pos] = (res[0]/res[3]) * sw;
 		output[pos+1] = (res[1]/res[3])  * sh;
 		output[pos+2] = (res[2]/res[3])  * sh;

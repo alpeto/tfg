@@ -62,7 +62,7 @@ float lastFrame = 0.0f;
 
 
 // camera
-glm::vec3 cameraPos   = glm::vec3(0.0f, 0.0f, 10.0f);
+glm::vec3 cameraPos   = glm::vec3(0.0f, 0.0f, 100.0f);
 glm::vec3 cameraFront = glm::vec3(0.0f, 0.0f, 1.0f);
 glm::vec3 cameraUp    = glm::vec3(0.0f, 1.0f, 0.0f);
 
@@ -355,7 +355,7 @@ void processInput(GLFWwindow *window)
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);
 
-    float cameraSpeed = 1000 * deltaTime;
+    float cameraSpeed = deltaTime;
     if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
         cameraPos += cameraSpeed * cameraFront;
     if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS)
@@ -428,7 +428,6 @@ bool obtainVertexs( const char * path, std::vector<float> &vertexs, std::vector<
 			vertexs.push_back(x);
 			vertexs.push_back(y);
 			vertexs.push_back(z);
-			std::cout<<"Speed : "<< s << std::endl;
 			speed.push_back(s);
 			//std::cout<<"VERTEX : "<< x << " "<< y << " "<< z <<" "<< s<<std::endl;
 		}

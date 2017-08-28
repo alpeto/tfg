@@ -1,0 +1,5 @@
+__kernel void initializeDepthBuffer(__global int* depthBuffer)
+{
+	int pos = get_global_id(0);
+	depthBuffer[pos] = INT_MAX;
+}

@@ -1,0 +1,23 @@
+__kernel void fragMerging(__write_only image2d_t output,__global float *vertexs, __global float *colorBuff, volatile __global int *depthBuffer, int scr_width)
+{
+	int currentVertex = get_global_id(0);
+	int currentElement = currentVertex * 3;
+	int px = ((int)vertexs[currentElement]);
+	int py= ((int)vertexs[currentElement+1]);
+	int2 position = (int2)(px,py);
+	barrier(CLK_LOCAL_MEM_FENCE & CLK_GLOBAL_MEM_FENCE);
+	if(px >= 0 && py >= 0){
+		int z = (int) (vertexs[currentElement+2]);
+		int depth_pos = (position.x * scr_width) + position.y;
+		int old = atomic_min(&depthBuffer[depth_pos], z);
+		if(old > z){
+			float4 color = (float4)(colorBuff[currentElement],colorBuff[currentElement+1],colorBuff[currentElement+2],0);
+			write_imagef(output, position, color);
+		}
+		else{
+			
+		}
+	}
+
+	barrier(CLK_LOCAL_MEM_FENCE & CLK_GLOBAL_MEM_FENCE);
+}

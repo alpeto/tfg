@@ -1,0 +1,51 @@
+__kernel void fragShader(__global float* speed, __global float* colorBuff)
+{
+	int posSpeed = get_global_id(0);
+	int posColorBuff = posSpeed * 3;
+	float4 color; 
+	if(speed[posSpeed] < 10)
+	{
+		color = (float4)(1,0,0,0); 
+	}
+	else if(speed[posSpeed] < 20)
+	{
+		color = (float4)(0,1,0,0); 
+	}
+	else if(speed[posSpeed] < 30)
+	{
+		color = (float4)(0,0,1,0); 
+	}
+	else if(speed[posSpeed] < 40 )
+	{
+		color = (float4)(1,1,0,0); 
+	}
+	else if(speed[posSpeed] < 50)
+	{
+		color = (float4)(1,0,1,0); 
+	}
+	else if(speed[posSpeed] < 60)
+	{
+		color = (float4)(0,1,1,0); 
+	}
+	else if(speed[posSpeed] < 70)
+	{
+		color = (float4)(0.5,1,1,0);
+	}
+	else if(speed[posSpeed] < 80)
+	{
+		color = (float4)(1,0,0,0);
+	}
+	else if(speed[posSpeed] < 90)
+	{
+		color = (float4)(1,0.5,1,0);
+	}
+	else
+	{
+		color = (float4)(1,1,1,0); 
+	}
+	
+	colorBuff[posColorBuff] = color.x;
+	colorBuff[posColorBuff+1] = color.y;
+	colorBuff[posColorBuff+2] = color.z;
+	
+}

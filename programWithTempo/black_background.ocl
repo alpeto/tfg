@@ -1,0 +1,5 @@
+__kernel void black_background(__write_only image2d_t output)
+{
+	float4 black = (float4)(0,0,0,0);	
+	write_imagef(output, (int2)(get_global_id(0), get_global_id(1)), black);
+}

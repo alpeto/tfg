@@ -31,7 +31,7 @@ cl_device_id device_id;
 cl_uint num_of_devices=0;
 cl_kernel kernel_vs, kernel_dt, kernel_fm, kernel_fs, kernel_bb;
 cl_program black_background, fragMerging, vertexShaderCL, fragShader, initializeDepthBuffer;
-cl_mem vertex_image, speedBuffer, colorBuffer, worldSpaceVertexBuffer, homogenousCoord, depthBuffer;	
+cl_mem vertex_image, speedBuffer, colorBuffer, worldSpaceVertexBuffer, homogenousCoord, depthBuffer, particleSizeBuffer;	
 cl_mem projViewMatrixBuffer;	
 cl_int err;
 size_t global;
@@ -42,10 +42,11 @@ std::string inputFragMerging = "fragMerging.ocl";
 std::string inputVertexShaderCL = "kernel_vertex_shader.ocl";
 std::string inputInitializeDepthBuffer = "initializeDepthBuffer.ocl";
 
-const char* inputDataFile = "givenData.csv";
+const char* inputDataFile = "givenDataAndSizeParticles.csv";
 
 std::vector<float> v_vertexs;
 std::vector<float> speed;
+std::vector<float> particleS;
 
 #define DATA_SIZE 1000000
 
@@ -74,7 +75,7 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void processInput(GLFWwindow *window);
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 void scroll_callback(GLFWwindow* window, double xoffset, double yoffset);
-bool obtainVertexs( const char * path, std::vector<float> &vertexs,std::vector<float> &speed);
+bool obtainVertexs( const char * path, std::vector<float> &vertexs,std::vector<float> &speed, std::vector<float> &particleS);
 std::string getKernelCode(std::string);
 void readCompileKernelProgram(std::string inputFileName, cl_program &prog);
 void createBuffers(int ncoord, int nvertex);
@@ -82,7 +83,7 @@ void initializeKernels();
 
 int main(int argc, char* argv[]){
     //Create a Vertex Buffer & Reading inputData	
-	if(!obtainVertexs(inputDataFile,v_vertexs,speed))
+	if(!obtainVertexs(inputDataFile,v_vertexs,speed, particleS))
 	{ 
 		std::cout<<"Error reading the input data file"<<std::endl;
 		return 1;
@@ -92,6 +93,7 @@ int main(int argc, char* argv[]){
 
 	float* a_vertexs = &v_vertexs[0];
 	float* a_speed = &speed[0];
+	float* a_particles = &particleS[0];
     
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -163,6 +165,10 @@ int main(int argc, char* argv[]){
 	
 	err = clEnqueueWriteBuffer(queue, speedBuffer, CL_TRUE, 0, sizeof(float) * (nvertex), a_speed, 0, NULL, NULL);
 	checkError(err,"Writing input data to buffer speedbuffer");
+	clFinish(queue);
+	
+	err = clEnqueueWriteBuffer(queue, particleSizeBuffer, CL_TRUE, 0, sizeof(float) * (nvertex), a_particles, 0, NULL, NULL);
+	checkError(err,"Writing input data to buffer particleSizeBuffer");
 	clFinish(queue);
 	
 	err = clEnqueueWriteBuffer(queue, worldSpaceVertexBuffer, CL_TRUE, 0, sizeof(float) * ncoord, a_vertexs, 0, NULL, NULL);
@@ -426,7 +432,7 @@ std::string getKernelCode(std::string inputFilename){
 	return result;
 
 }
-bool obtainVertexs( const char * path, std::vector<float> &vertexs, std::vector<float> &speed){
+bool obtainVertexs( const char * path, std::vector<float> &vertexs, std::vector<float> &speed, std::vector<float> &particleS){
 	float maxx = 12749;
 	float minx = 5250;
 	float maxy = 20749;
@@ -439,8 +445,8 @@ bool obtainVertexs( const char * path, std::vector<float> &vertexs, std::vector<
 	FILE * file = fopen(path, "r");
 	if(file == NULL) return false;
 	while(1){
-		float x,y,z,s;
-		int res = fscanf(file, "%f %f %f %f\n", &x, &y, &z, &s);	
+		float x,y,z,s,siz;
+		int res = fscanf(file, "%f %f %f %f %f\n", &x, &y, &z, &s, &siz);	
 		if (res == EOF) break;
 		else{
 			x = (SCR_WIDTH / (maxx-minx)) * (x - minx);
@@ -451,6 +457,7 @@ bool obtainVertexs( const char * path, std::vector<float> &vertexs, std::vector<
 			vertexs.push_back(y);
 			vertexs.push_back(z);
 			speed.push_back(s);
+			particleS.push_back(siz);
 			//std::cout<<"VERTEX : "<< x << " "<< y << " "<< z <<" "<< s<<std::endl;
 		}
 	}
@@ -476,6 +483,9 @@ void createBuffers(int ncoord, int nvertex){
 	
 	projViewMatrixBuffer = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(float) * 16, NULL, &err);
 	checkError(err,"Creating buffer projViewMatrixBuffer: ");
+	
+	particleSizeBuffer = clCreateBuffer(context, CL_MEM_READ_WRITE, sizeof(float) * nvertex, NULL, &err);
+	checkError(err,"Creating buffer particleSize: ");
 	
 }
 
@@ -574,6 +584,10 @@ void initializeKernels(){
 	err = clSetKernelArg(kernel_fm, 3, sizeof(depthBuffer), &depthBuffer); 
 	checkError(err,"Setting Kernel Argument (depthBuffer) in FragmentMerging");
 	err = clSetKernelArg(kernel_fm, 4, sizeof(SCR_WIDTH), &SCR_WIDTH); 
-	checkError(err,"Setting Kernel Argument (depthBuffer) in FragmentMerging");
+	checkError(err,"Setting Kernel Argument Screen width in FragmentMerging");
+	err = clSetKernelArg(kernel_fm, 5, sizeof(SCR_HEIGHT), &SCR_HEIGHT); 
+	checkError(err,"Setting Kernel Argument Screen height in FragmentMerging");
+	err = clSetKernelArg(kernel_fm, 6, sizeof(particleSizeBuffer), &particleSizeBuffer); 
+	checkError(err,"Setting Kernel Argument (particleSizeBuffer) in FragmentMerging");
 }
 
